@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors['secret_question'] = 'Неверный секретный ответ';
             }
         } catch (PDOException $e) {
-            $errors['db'] = 'Ошибка базы данных. Попопробуйте позже.';
+            $errors['db'] = 'Ошибка базы данных. Попробуйте позже.';
         }
     }
 

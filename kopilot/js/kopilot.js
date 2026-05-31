@@ -7,14 +7,13 @@
 
 const kop = {
 
-        // ЖИВАЯ ПЕРЕЗАГРУЗКА (только для разработки)
-        liveReload(checkUrl = '/kopilot/php/kopilot_reload.php', interval = 1000) {
+    // ЖИВАЯ ПЕРЕЗАГРУЗКА (только для разработки)
+    liveReload(checkUrl = '/kopilot/php/kopilot_reload.php', interval = 1000) {
         let lastTimestamp = null;
         console.log('[LiveReload] Запущен, мониторинг через', checkUrl);
 
         const check = async () => {
             try {
-                // Случайный параметр, чтобы обойти кеш браузера
                 const url = checkUrl + '?_=' + Date.now();
                 const response = await fetch(url);
                 if (!response.ok) {
@@ -26,7 +25,6 @@ const kop = {
                 console.log('[LiveReload] Проверка timestamp:', currentTimestamp);
 
                 if (lastTimestamp === null) {
-                    // Первый запуск — просто запоминаем
                     lastTimestamp = currentTimestamp;
                     console.log('[LiveReload] Первый запуск, timestamp сохранён');
                 } else if (currentTimestamp !== lastTimestamp) {
@@ -39,10 +37,10 @@ const kop = {
         };
 
         setInterval(check, interval);
-    },   
+    },
 
     // ВНУТРЕННИЙ ХЕЛПЕР ДЛЯ ЗАПРОСОВ
-        async _fetch(url, options = {}) {
+    async _fetch(url, options = {}) {
         const csrfMeta = document.querySelector('meta[name="csrf-token"]');
         const csrfInput = document.querySelector('input[name="_csrf"]');
         const csrfToken = csrfMeta?.content || csrfInput?.value || '';
@@ -52,7 +50,6 @@ const kop = {
             ...(options.headers || {}),
         };
 
-        // Если тело — FormData, НЕ ставим Content-Type (браузер сам подставит multipart/form-data)
         if (!(options.body instanceof FormData)) {
             headers['Content-Type'] = 'application/json';
         }
@@ -141,43 +138,60 @@ const kop = {
         window.addEventListener('scroll', onScroll, { passive: true });
     },
 
-    // УВЕДОМЛЕНИЯ
+    // УВЕДОМЛЕНИЯ (централизованный контейнер)
     flash(message, duration = 3000) {
-        const toast = document.createElement('div');
+        const toast = document.getElementById('global-toast');
+        if (!toast) {
+            const temp = document.createElement('div');
+            temp.textContent = message;
+            temp.style.position = 'fixed';
+            temp.style.bottom = '20px';
+            temp.style.right = '20px';
+            temp.style.background = '#1e1e2f';
+            temp.style.color = '#fff';
+            temp.style.padding = '12px 20px';
+            temp.style.borderRadius = '12px';
+            temp.style.zIndex = '11000';
+            document.body.appendChild(temp);
+            setTimeout(() => temp.remove(), duration);
+            return temp;
+        }
         toast.textContent = message;
-        document.body.appendChild(toast);
-
+        toast.classList.add('visible');
+        if (toast._timeout) clearTimeout(toast._timeout);
         if (duration > 0) {
-            setTimeout(() => {
-                toast.remove();
+            toast._timeout = setTimeout(() => {
+                toast.classList.remove('visible');
             }, duration);
         }
         return toast;
     },
 
     // УТИЛИТЫ ДЛЯ DOM-МАНИПУЛЯЦИЙ
-
-    // Сокращение для querySelector
     $(selector, context = document) {
         return context.querySelector(selector);
     },
 
-    // Показать элемент
     show(el) {
         if (typeof el === 'string') el = this.$(el);
         if (el) el.style.display = '';
     },
 
-    // Скрыть элемент
     hide(el) {
         if (typeof el === 'string') el = this.$(el);
         if (el) el.style.display = 'none';
     },
 
-    // Переключить класс у элемента
     toggleClass(el, className) {
         if (typeof el === 'string') el = this.$(el);
         if (el) el.classList.toggle(className);
+    },
+
+    // ЭКРАНИРОВАНИЕ HTML
+    esc(str) {
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
     },
 
     // ВАЛИДАЦИЯ ЗНАЧЕНИЯ ПО ПРАВИЛАМ

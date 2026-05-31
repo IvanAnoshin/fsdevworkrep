@@ -2,7 +2,7 @@
 
 session_start();
 
-if (isset($_SESSION['authenticated'])) {
+if (isset($_SESSION['user_id'])) {
     header('Location: profile.php');
     exit;
 }
@@ -68,7 +68,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // Сохраняем ошибки
     $_SESSION['errors'] = $errors;
     $_SESSION['old'] = [
         'first_name' => $firstName,
