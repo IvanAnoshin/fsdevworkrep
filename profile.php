@@ -44,6 +44,48 @@ $pageTitle = esc($user['first_name'] . ' ' . $user['last_name']) . ' - Friendsca
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= $pageTitle ?></title>
     <link rel="stylesheet" href="css/main.css">
+    <style>
+        /* Дополнительные стили для иконок в профиле */
+        .bioIcon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .bioIcon svg {
+            width: 18px;
+            height: 18px;
+            display: block;
+            margin: 0 auto;
+        }
+        /* Фикс для аватара – миниатюра */
+        .profileAvatar {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            overflow: hidden;
+            flex-shrink: 0;
+            background: #eef1f8;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .profileAvatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .profileAvatar .accountAvatarPlaceholder {
+            font-size: 2rem;
+            font-weight: 600;
+            color: #4a4f63;
+        }
+    </style>
 </head>
 <body>
     <div class="sidebar"><?php require_once "components/header.php"; ?></div>
@@ -68,35 +110,57 @@ $pageTitle = esc($user['first_name'] . ' ' . $user['last_name']) . ' - Friendsca
                     <div class="bio">
                         <div class="bioItem">
                             <span class="bioIcon" style="background: #f0f0f0; color: #3b5dd3;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                    <circle cx="12" cy="7" r="4"/>
+                                </svg>
                             </span>
                             <span class="bioLabel">О себе:</span>
                             <span class="bioValue"><?= esc($user['about'] ?? '') ?></span>
                         </div>
+
                         <div class="bioItem">
                             <span class="bioIcon" style="background: #f0f0f0; color: #3b5dd3;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 2c-3.3 0-6 2.7-6 6 0 5 6 12 6 12s6-7 6-12c0-3.3-2.7-6-6-6z"/>
+                                    <circle cx="12" cy="8" r="2"/>
+                                </svg>
                             </span>
                             <span class="bioLabel">Город:</span>
                             <span class="bioValue"><?= esc($user['city'] ?? '') ?></span>
                         </div>
+
                         <div class="bioItem">
                             <span class="bioIcon" style="background: #f0f0f0; color: #3b5dd3;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                    <path d="M2 17l10 5 10-5"/>
+                                    <path d="M2 12l10 5 10-5"/>
+                                </svg>
                             </span>
                             <span class="bioLabel">Статус отношений:</span>
                             <span class="bioValue"><?= esc($user['relationship'] ?? '') ?></span>
                         </div>
+
                         <div class="bioItem">
                             <span class="bioIcon" style="background: #f0f0f0; color: #3b5dd3;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+                                    <line x1="9" y1="9" x2="9.01" y2="9"/>
+                                    <line x1="15" y1="9" x2="15.01" y2="9"/>
+                                </svg>
                             </span>
                             <span class="bioLabel">Интересы:</span>
                             <span class="bioValue"><?= esc($user['interests'] ?? '') ?></span>
                         </div>
+
                         <div class="bioItem">
                             <span class="bioIcon" style="background: #f0f0f0; color: #3b5dd3;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <line x1="8" y1="12" x2="16" y2="12"/>
+                                </svg>
                             </span>
                             <span class="bioLabel">Мне не нравится:</span>
                             <span class="bioValue"><?= esc($user['dislikes'] ?? '') ?></span>
@@ -212,47 +276,50 @@ $pageTitle = esc($user['first_name'] . ' ' . $user['last_name']) . ' - Friendsca
             </div>
 
             <div class="facebookSection" style="display: none;">
-                <div class="facebookLabel"><p>Мои фото</p></div>
-                <div class="facebook">
-                    <?php for ($i = 0; $i < 9; $i++): ?>
-                        <img class="facebookPicture" src="" alt="">
-                    <?php endfor; ?>
+                <div class="facebookLabel">
+                    <p>Мои фото</p>
+                    <button id="upload-photo-btn" class="btn btn--primary" style="margin-left: 16px;">+ Загрузить</button>
+                    <input type="file" id="photo-file-input" accept="image/jpeg,image/png,image/gif,image/webp" style="display: none;">
                 </div>
+                <div id="photos-grid" class="facebook"></div>
             </div>
+
             <div class="personalInfoSection" style="display: none;">
                 <div class="editCard">
                     <h3 class="accountTitle">Личная информация</h3>
                     <div class="accountGroup">
                         <?php
+                        // Список полей с SVG-иконками (минималистичные)
                         $fields = [
-                            'hometown' => ['label' => 'Родной город', 'icon' => '🌍'],
-                            'city' => ['label' => 'Город', 'icon' => '🏙️'],
-                            'country' => ['label' => 'Страна', 'icon' => '🌐'],
-                            'languages' => ['label' => 'Языки', 'icon' => '🗣️'],
-                            'job' => ['label' => 'Работа', 'icon' => '💼'],
-                            'education' => ['label' => 'Обучение', 'icon' => '🎓'],
-                            'military' => ['label' => 'Служба', 'icon' => '🎖️'],
-                            'religion' => ['label' => 'Вера', 'icon' => '🕊️'],
-                            'personality' => ['label' => 'Характер', 'icon' => '🧠'],
-                            'dreams' => ['label' => 'Мечты', 'icon' => '✨'],
-                            'intentions' => ['label' => 'Намерения', 'icon' => '🎯'],
-                            'values' => ['label' => 'Ценю в людях', 'icon' => '💎'],
-                            'quotes' => ['label' => 'Любимые цитаты', 'icon' => '📜'],
-                            'idols' => ['label' => 'Кумиры', 'icon' => '🌟'],
-                            'gadgets' => ['label' => 'Мои гаджеты', 'icon' => '📱']
+                            'hometown'   => ['label' => 'Родной город', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2c-3.3 0-6 2.7-6 6 0 5 6 12 6 12s6-7 6-12c0-3.3-2.7-6-6-6z"/><circle cx="12" cy="8" r="2"/></svg>'],
+                            'city'       => ['label' => 'Город', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/></svg>'],
+                            'country'    => ['label' => 'Страна', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'],
+                            'languages'  => ['label' => 'Языки', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>'],
+                            'job'        => ['label' => 'Работа', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>'],
+                            'education'  => ['label' => 'Обучение', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>'],
+                            'military'   => ['label' => 'Служба', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>'],
+                            'religion'   => ['label' => 'Вера', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>'],
+                            'personality'=> ['label' => 'Характер', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>'],
+                            'dreams'     => ['label' => 'Мечты', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'],
+                            'intentions' => ['label' => 'Намерения', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>'],
+                            'values'     => ['label' => 'Ценю в людях', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 7l10-5 10 5-10 15z"/><path d="M2 7l10 5 10-5"/><line x1="12" y1="12" x2="12" y2="22"/></svg>'],
+                            'quotes'     => ['label' => 'Любимые цитаты', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 11h-4v4h4v-4z"/><path d="M18 11h-4v4h4v-4z"/><path d="M21 6v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'],
+                            'idols'      => ['label' => 'Кумиры', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>'],
+                            'gadgets'    => ['label' => 'Мои гаджеты', 'icon' => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>']
                         ];
+
                         $hasData = false;
                         foreach ($fields as $key => $info):
-                            if (!empty($user[$key])):
-                                $hasData = true; ?>
-                                <div class="bioItem">
-                                    <span class="bioIcon" style="background: #fef3c7; color: #d97706;"><?= $info['icon'] ?></span>
-                                    <span class="bioLabel"><?= $info['label'] ?>:</span>
-                                    <span class="bioValue"><?= esc($user[$key]) ?></span>
-                                </div>
-                            <?php endif;
-                        endforeach;
-                        if (!$hasData): ?>
+                            $value = $user[$key] ?? '';
+                            if ($value !== '') $hasData = true;
+                        ?>
+                            <div class="bioItem">
+                                <span class="bioIcon" style="background: #f0f2f5; color: #4b5563;"><?= $info['icon'] ?></span>
+                                <span class="bioLabel"><?= $info['label'] ?>:</span>
+                                <span class="bioValue"><?= esc($value) ?: '<span style="color:#8b8fa3;">Не указано</span>' ?></span>
+                            </div>
+                        <?php endforeach; ?>
+                        <?php if (!$hasData): ?>
                             <p style="color:#8b8fa3;text-align:center;padding:20px;">Здесь пока ничего нет. Заполните раздел <a href="settings.php?act=edit">«Личное»</a> в настройках.</p>
                         <?php endif; ?>
                     </div>
@@ -316,7 +383,6 @@ $pageTitle = esc($user['first_name'] . ' ' . $user['last_name']) . ' - Friendsca
         </div>
     </div>
 
-    <script src="/kopilot/js/kopilot.js"></script>
     <script>
         const currentUserId = <?= (int)$_SESSION['user_id'] ?>;
         const postMenu = document.createElement('div');
@@ -910,6 +976,152 @@ $pageTitle = esc($user['first_name'] . ' ' . $user['last_name']) . ' - Friendsca
         attachCommentHandler();
         attachPostMenu();
         attachShareButtons();
+    </script>
+
+    <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
+
+    <script>
+    (function() {
+        console.log('=== ФОТОАЛЬБОМ: скрипт запущен ===');
+        
+        // CSRF-токен
+        if (!window.csrfToken) {
+            const csrfInput = document.querySelector('input[name="_csrf"]');
+            window.csrfToken = csrfInput ? csrfInput.value : '';
+            console.log('CSRF токен загружен:', window.csrfToken ? 'есть' : 'НЕТ!');
+        } else {
+            console.log('CSRF токен уже был:', window.csrfToken);
+        }
+
+        const uploadBtn = document.getElementById('upload-photo-btn');
+        const fileInput = document.getElementById('photo-file-input');
+        const photosGrid = document.getElementById('photos-grid');
+        
+        console.log('uploadBtn найден:', !!uploadBtn);
+        console.log('fileInput найден:', !!fileInput);
+        console.log('photosGrid найден:', !!photosGrid);
+        
+        if (!uploadBtn || !fileInput || !photosGrid) {
+            console.error('Один из элементов не найден!');
+            return;
+        }
+
+        function loadPhotos() {
+            console.log('loadPhotos() вызвана');
+            fetch('/api/get-photos', {
+                headers: { 'Accept': 'application/json', 'X-CSRF-Token': window.csrfToken }
+            })
+            .then(response => {
+                console.log('GET /api/get-photos ответ:', response.status, response.statusText);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Данные от /api/get-photos:', data);
+                if (data.photos && data.photos.length) {
+                    console.log('Количество фото:', data.photos.length);
+                    photosGrid.innerHTML = '';
+                    data.photos.forEach((photo, idx) => {
+                        console.log(`Фото ${idx}: id=${photo.id}, url=${photo.url}`);
+                        const div = document.createElement('div');
+                        div.className = 'facebookPicture';
+                        div.style.position = 'relative';
+                        const img = document.createElement('img');
+                        img.src = photo.url || '';
+                        img.style.cssText = 'width:100%;height:100%;object-fit:cover;cursor:pointer';
+                        img.onerror = () => console.error(`Ошибка загрузки изображения: ${photo.url}`);
+                        img.addEventListener('click', () => {
+                            const viewer = document.createElement('div');
+                            viewer.className = 'image-viewer';
+                            viewer.innerHTML = `<img src="${photo.url || ''}" alt="">`;
+                            viewer.addEventListener('click', () => viewer.remove());
+                            document.body.appendChild(viewer);
+                        });
+                        const delBtn = document.createElement('button');
+                        delBtn.innerHTML = '✕';
+                        delBtn.style.cssText = 'position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center';
+                        delBtn.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            if (confirm('Удалить фото?')) {
+                                fetch('/api/delete-photo', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken },
+                                    body: JSON.stringify({ photo_id: photo.id })
+                                })
+                                .then(r => r.json())
+                                .then(res => {
+                                    console.log('Удаление фото:', res);
+                                    if (res.success) loadPhotos();
+                                    else alert('Ошибка удаления: ' + (res.error || 'неизвестно'));
+                                })
+                                .catch(err => console.error('Ошибка удаления:', err));
+                            }
+                        });
+                        div.appendChild(img);
+                        div.appendChild(delBtn);
+                        photosGrid.appendChild(div);
+                    });
+                } else {
+                    console.log('Нет фото, показываем заглушку');
+                    photosGrid.innerHTML = '<p style="width:100%;text-align:center;color:#8b8fa3;grid-column:1/-1;">Нет фото. Загрузите первое!</p>';
+                }
+            })
+            .catch(err => {
+                console.error('Ошибка loadPhotos:', err);
+                if (window.kop && window.kop.flash) kop.flash('Не удалось загрузить фото');
+                else alert('Ошибка загрузки фото');
+            });
+        }
+
+        uploadBtn.addEventListener('click', () => {
+            console.log('Кнопка загрузки нажата');
+            fileInput.click();
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            console.log('Выбран файл:', file.name, file.type, file.size);
+            const formData = new FormData();
+            formData.append('photo', file);
+            fetch('/api/upload-photo', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': window.csrfToken },
+                body: formData
+            })
+            .then(response => {
+                console.log('POST /api/upload-photo ответ:', response.status);
+                if (!response.ok) return response.json().then(err => { throw new Error(err.error || 'Ошибка сервера'); });
+                return response.json();
+            })
+            .then(res => {
+                console.log('Результат загрузки:', res);
+                if (res.success) {
+                    loadPhotos();
+                    if (window.kop && window.kop.flash) kop.flash('Фото загружено');
+                } else {
+                    throw new Error(res.error || 'Неизвестная ошибка');
+                }
+            })
+            .catch(err => {
+                console.error('Ошибка загрузки:', err);
+                if (window.kop && window.kop.flash) kop.flash(err.message);
+                else alert(err.message);
+            });
+            fileInput.value = '';
+        });
+
+        let loaded = false;
+        const observer = new MutationObserver(() => {
+            const fbSection = document.querySelector('.facebookSection');
+            if (fbSection && fbSection.style.display !== 'none' && !loaded) {
+                console.log('Вкладка Фотоальбомы активирована, загружаем фото');
+                loaded = true;
+                loadPhotos();
+            }
+        });
+        observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['style'] });
+    })();
     </script>
 </body>
 </html>

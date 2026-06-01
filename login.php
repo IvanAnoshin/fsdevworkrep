@@ -93,7 +93,8 @@ unset($_SESSION['errors'], $_SESSION['old']);
 </head>
 <body>
     <div class= "loginPageArea">
-        <p class="welcome">Добро пожаловать в Friendscape</p>
+        <p class="welcome">Добро пожаловать</p>
+        <p class="welcome">в Friendscape</p>
         <div class="authLoginSection">
             <form method="post" action="login.php">
                 <input

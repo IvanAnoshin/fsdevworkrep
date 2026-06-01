@@ -81,7 +81,47 @@
         copy: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
     };
 
-    // ---------- HTTP ЗАПРОСЫ (С ОТКЛЮЧЕНИЕМ КЕША) ----------
+    // ---------- ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛАМИ ----------
+    function getFileTypeFromUrl(url) {
+        if (!url) return 'file';
+        const ext = url.split('.').pop().toLowerCase();
+        if (['jpg','jpeg','png','gif','webp','bmp','svg'].includes(ext)) return 'image';
+        if (['mp4','webm','mov','avi','mkv'].includes(ext)) return 'video';
+        if (['pdf'].includes(ext)) return 'pdf';
+        return 'file';
+    }
+
+    function renderFileMessage(fileUrl, fileName, isMine, msgId = null, createdAt = new Date()) {
+        const type = getFileTypeFromUrl(fileUrl);
+        const timeStr = formatTime(createdAt);
+        const msgIdAttr = msgId ? `data-msg-id="${msgId}"` : '';
+        if (type === 'image') {
+            return `<div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message-file" ${msgIdAttr} data-is-mine="${isMine}">
+                        <img class="message-image-preview" src="${esc(fileUrl)}" alt="${esc(fileName)}" loading="lazy" onclick="openImageViewer('${esc(fileUrl)}')">
+                        <div class="messageInfo"><p></p><p>${timeStr}</p></div>
+                    </div>`;
+        } else if (type === 'video') {
+            return `<div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message-file" ${msgIdAttr} data-is-mine="${isMine}">
+                        <video class="message-video-preview" src="${esc(fileUrl)}" controls preload="metadata"></video>
+                        <div class="messageInfo"><p></p><p>${timeStr}</p></div>
+                    </div>`;
+        } else {
+            return `<div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message-file" ${msgIdAttr} data-is-mine="${isMine}">
+                        <a href="${esc(fileUrl)}" target="_blank" class="file-attachment">📎 ${esc(fileName)}</a>
+                        <div class="messageInfo"><p></p><p>${timeStr}</p></div>
+                    </div>`;
+        }
+    }
+
+    window.openImageViewer = function(url) {
+        const viewer = document.createElement('div');
+        viewer.className = 'image-viewer';
+        viewer.innerHTML = `<img src="${url}" alt="">`;
+        viewer.addEventListener('click', () => viewer.remove());
+        document.body.appendChild(viewer);
+    };
+
+    // ---------- HTTP ЗАПРОСЫ ----------
     function getCsrfHeader() { return { 'X-CSRF-Token': window.csrfToken }; }
     async function apiGet(url, options = {}) {
         const response = await fetch(url, {
@@ -123,7 +163,46 @@
         return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
     }
 
-    // ---------- ЗАГРУЗКА СПИСКА ЧАТОВ (БЕЗ ИКОНКИ ЗАКРЕПЛЕНИЯ) ----------
+    // Плавная подгрузка старых сообщений (сохраняет позицию скролла)
+    async function appendMessages(container, newMessages, isGroup = false) {
+        if (!newMessages.length) return;
+        // Сохраняем текущую прокрутку
+        const oldScrollHeight = container.scrollHeight;
+        const oldScrollTop = container.scrollTop;
+
+        // Генерируем HTML для новых сообщений
+        let fragmentHtml = '';
+        let lastDate = '';
+        for (const msg of newMessages) {
+            const date = new Date(msg.created_at);
+            const dateStr = date.toLocaleDateString('ru-RU');
+            if (dateStr !== lastDate) {
+                fragmentHtml += `<div class="chatDateBubble"><p>${dateStr}</p></div>`;
+                lastDate = dateStr;
+            }
+            const isMine = msg.sender_id == state.userId;
+            const senderName = isGroup && !isMine ? `${msg.first_name} ${msg.last_name}` : '';
+            if (msg.file_url) {
+                fragmentHtml += renderFileMessage(msg.file_url, msg.file_url.split('/').pop(), isMine, msg.id, date);
+            } else {
+                fragmentHtml += `
+                    <div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}">
+                        ${senderName ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}
+                        <p>${esc(msg.content)}</p>
+                        <div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>
+                    </div>
+                `;
+            }
+        }
+        // Вставляем в начало контейнера
+        container.insertAdjacentHTML('afterbegin', fragmentHtml);
+
+        // Восстанавливаем прокрутку с учётом добавленной высоты
+        const newScrollHeight = container.scrollHeight;
+        container.scrollTop = oldScrollTop + (newScrollHeight - oldScrollHeight);
+    }
+
+    // ---------- ЗАГРУЗКА СПИСКА ЧАТОВ ----------
     async function loadChats() {
         try {
             const [chatsData, groupsData] = await Promise.all([
@@ -173,7 +252,6 @@
         }
     }
 
-    // Генерация элемента списка чатов (без кнопки закрепления)
     function renderChatItem(item, isActive) {
         let avatarHtml = '';
         if (item.type === 'private' && item.avatar) {
@@ -181,8 +259,9 @@
         } else {
             avatarHtml = `<div class="chatUnitAvatar chatUnitAvatar--placeholder">${getInitials(item.name)}</div>`;
         }
+        const pinnedClass = item.is_pinned ? 'pinned' : '';
         return `
-            <div class="chatUnit ${isActive ? 'active' : ''}" data-type="${item.type}" data-id="${item.id}">
+            <div class="chatUnit ${isActive ? 'active' : ''} ${pinnedClass}" data-type="${item.type}" data-id="${item.id}">
                 ${avatarHtml}
                 <div class="chatUnitContent">
                     <div class="chatUnitUsername"><p>${esc(item.name)}</p></div>
@@ -198,22 +277,13 @@
             chatListContainer.innerHTML = '<p class="media-empty">Нет активных чатов</p>';
             return;
         }
-        const existingNodes = new Map();
-        document.querySelectorAll('.chatUnit').forEach(node => {
-            const type = node.dataset.type, id = node.dataset.id;
-            if (type && id) existingNodes.set(`${type}|${id}`, node);
-        });
-        const newSet = new Set(newItems.map(i => `${i.type}|${i.id}`));
-        for (let [key, node] of existingNodes.entries()) if (!newSet.has(key)) node.remove();
+        let html = '';
         for (const item of newItems) {
-            const key = `${item.type}|${item.id}`;
-            const existing = existingNodes.get(key);
             const isActive = (item.type === 'private' && item.id == state.activeChatId && state.activeChatType === 'private') ||
-                             (item.type === 'group' && item.id == state.activeGroupId && state.activeChatType === 'group');
-            const newHtml = renderChatItem(item, isActive);
-            if (existing) existing.outerHTML = newHtml;
-            else chatListContainer.insertAdjacentHTML('beforeend', newHtml);
+                            (item.type === 'group' && item.id == state.activeGroupId && state.activeChatType === 'group');
+            html += renderChatItem(item, isActive);
         }
+        chatListContainer.innerHTML = html;
         initChatSearch();
     }
 
@@ -246,7 +316,6 @@
         badge.style.display = count > 0 ? 'inline' : 'none';
     }
 
-    // ---------- ФУНКЦИЯ ЗАКРЕПЛЕНИЯ (ВЫЗЫВАЕТСЯ ИЗ МЕНЮ) ----------
     async function togglePin(chatId, type, currentPinned) {
         const newPinned = !currentPinned;
         const endpoint = type === 'private' ? '/api/chats/pin' : '/api/groups/pin';
@@ -266,7 +335,6 @@
         } catch(e) { window.kop.flash('Ошибка изменения закрепления'); }
     }
 
-    // ---------- ФОНОВОЕ ОБНОВЛЕНИЕ С ЗАЩИТОЙ LAST_MESSAGE ----------
     async function refreshChatList() {
         try {
             const [chatsData, groupsData] = await Promise.all([
@@ -352,6 +420,7 @@
             }
         } catch(e) { console.error(e); }
     }
+
     function startBackgroundRefresh() {
         if (state.backgroundTimer) clearInterval(state.backgroundTimer);
         state.backgroundTimer = setInterval(() => {
@@ -452,7 +521,7 @@
         chatViewPanel.innerHTML = '<div class="chat-placeholder"><p>Выберите чат слева</p></div>';
     }
 
-    // ---------- ПОЛЛИНГ ЧЕРЕЗ setInterval (СТАБИЛЬНО, С ОТЛАДКОЙ) ----------
+    // ---------- ПОЛЛИНГ ----------
     let pollingIntervals = {};
 
     function stopPolling() {
@@ -487,12 +556,18 @@
                             if (document.querySelector(`[data-msg-id="${msg.id}"]`)) continue;
                             const isMine = msg.sender_id == state.userId;
                             const date = new Date(msg.created_at);
-                            container.insertAdjacentHTML('beforeend', `
-                                <div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}">
-                                    <p>${esc(msg.content)}</p>
-                                    <div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>
-                                </div>
-                            `);
+                            let msgHtml;
+                            if (msg.file_url) {
+                                msgHtml = renderFileMessage(msg.file_url, msg.file_url.split('/').pop(), isMine, msg.id, date);
+                            } else {
+                                msgHtml = `
+                                    <div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}">
+                                        <p>${esc(msg.content)}</p>
+                                        <div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>
+                                    </div>
+                                `;
+                            }
+                            container.insertAdjacentHTML('beforeend', msgHtml);
                             if (msg.id > cache.lastPolledId) cache.lastPolledId = msg.id;
                         }
                         container.scrollTop = container.scrollHeight;
@@ -502,8 +577,6 @@
                             if (document.hidden || state.activeChatId != chatId) updateUnreadBadge(chatId, 'private', true);
                         }
                     }
-                } else {
-                    // нет новых сообщений – ничего не делаем
                 }
             } catch(e) {
                 console.error('Poll error:', e);
@@ -535,15 +608,21 @@
                         for (const msg of data.messages) {
                             if (document.querySelector(`[data-msg-id="${msg.id}"]`)) continue;
                             const isMine = msg.sender_id == state.userId;
-                            const senderName = `${msg.first_name} ${msg.last_name}`;
                             const date = new Date(msg.created_at);
-                            container.insertAdjacentHTML('beforeend', `
-                                <div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}">
-                                    ${!isMine ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}
-                                    <p>${esc(msg.content)}</p>
-                                    <div class="messageInfo"><p></p><p>${formatTime(date)}</p></div>
-                                </div>
-                            `);
+                            let msgHtml;
+                            if (msg.file_url) {
+                                msgHtml = renderFileMessage(msg.file_url, msg.file_url.split('/').pop(), isMine, msg.id, date);
+                            } else {
+                                const senderName = `${msg.first_name} ${msg.last_name}`;
+                                msgHtml = `
+                                    <div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}">
+                                        ${!isMine ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}
+                                        <p>${esc(msg.content)}</p>
+                                        <div class="messageInfo"><p></p><p>${formatTime(date)}</p></div>
+                                    </div>
+                                `;
+                            }
+                            container.insertAdjacentHTML('beforeend', msgHtml);
                             if (msg.id > cache.lastPolledId) cache.lastPolledId = msg.id;
                         }
                         container.scrollTop = container.scrollHeight;
@@ -576,32 +655,14 @@
             const messages = data.messages || [];
             if (messages.length < 20) cache.hasMore = false;
             if (append) {
-                const fragment = document.createDocumentFragment();
-                let lastDate = '';
-                const existingIds = new Set([...document.querySelectorAll('.message')].map(el => el.dataset.msgId));
-                for (const msg of messages) {
-                    if (existingIds.has(String(msg.id))) continue;
-                    const date = new Date(msg.created_at);
-                    const dateStr = date.toLocaleDateString('ru-RU');
-                    if (dateStr !== lastDate) {
-                        const dateDiv = document.createElement('div');
-                        dateDiv.className = 'chatDateBubble';
-                        dateDiv.innerHTML = `<p>${dateStr}</p>`;
-                        fragment.appendChild(dateDiv);
-                        lastDate = dateStr;
-                    }
-                    const isMine = msg.sender_id == state.userId;
-                    const msgDiv = document.createElement('div');
-                    msgDiv.className = `${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in`;
-                    msgDiv.dataset.msgId = msg.id;
-                    msgDiv.dataset.isMine = isMine;
-                    msgDiv.innerHTML = `<p>${esc(msg.content)}</p><div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>`;
-                    fragment.appendChild(msgDiv);
+                if (messages.length) {
+                    await appendMessages(container, messages, false);
+                    // Обновляем кеш – добавляем в начало
+                    cache.messages = messages.concat(cache.messages);
+                    cache.page = page;
+                    const lastMsgId = messages[messages.length-1]?.id;
+                    if (lastMsgId) cache.lastPolledId = Math.max(cache.lastPolledId, lastMsgId);
                 }
-                container.insertBefore(fragment, container.firstChild);
-                cache.messages = messages.concat(cache.messages);
-                cache.page = page;
-                if (messages.length) cache.lastPolledId = Math.max(cache.lastPolledId, messages[messages.length-1].id);
             } else {
                 cache.messages = messages;
                 cache.page = 1;
@@ -633,33 +694,13 @@
             const messages = data.messages || [];
             if (messages.length < 20) cache.hasMore = false;
             if (append) {
-                const fragment = document.createDocumentFragment();
-                let lastDate = '';
-                const existingIds = new Set([...document.querySelectorAll('.message')].map(el => el.dataset.msgId));
-                for (const msg of messages) {
-                    if (existingIds.has(String(msg.id))) continue;
-                    const date = new Date(msg.created_at);
-                    const dateStr = date.toLocaleDateString('ru-RU');
-                    if (dateStr !== lastDate) {
-                        const dateDiv = document.createElement('div');
-                        dateDiv.className = 'chatDateBubble';
-                        dateDiv.innerHTML = `<p>${dateStr}</p>`;
-                        fragment.appendChild(dateDiv);
-                        lastDate = dateStr;
-                    }
-                    const isMine = msg.sender_id == state.userId;
-                    const senderName = `${msg.first_name} ${msg.last_name}`;
-                    const msgDiv = document.createElement('div');
-                    msgDiv.className = `${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in`;
-                    msgDiv.dataset.msgId = msg.id;
-                    msgDiv.dataset.isMine = isMine;
-                    msgDiv.innerHTML = `${!isMine ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}<p>${esc(msg.content)}</p><div class="messageInfo"><p></p><p>${formatTime(date)}</p></div>`;
-                    fragment.appendChild(msgDiv);
+                if (messages.length) {
+                    await appendMessages(container, messages, true);
+                    cache.messages = messages.concat(cache.messages);
+                    cache.page = page;
+                    const lastMsgId = messages[messages.length-1]?.id;
+                    if (lastMsgId) cache.lastPolledId = Math.max(cache.lastPolledId, lastMsgId);
                 }
-                container.insertBefore(fragment, container.firstChild);
-                cache.messages = messages.concat(cache.messages);
-                cache.page = page;
-                if (messages.length) cache.lastPolledId = Math.max(cache.lastPolledId, messages[messages.length-1].id);
             } else {
                 cache.messages = messages;
                 cache.page = 1;
@@ -677,16 +718,23 @@
         for (const msg of messages) {
             const date = new Date(msg.created_at);
             const dateStr = date.toLocaleDateString('ru-RU');
-            if (dateStr !== lastDate) { html += `<div class="chatDateBubble"><p>${dateStr}</p></div>`; lastDate = dateStr; }
+            if (dateStr !== lastDate) {
+                html += `<div class="chatDateBubble"><p>${dateStr}</p></div>`;
+                lastDate = dateStr;
+            }
             const isMine = msg.sender_id == state.userId;
             const senderName = isGroup && !isMine ? `${msg.first_name} ${msg.last_name}` : '';
-            html += `
-                <div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}">
-                    ${senderName ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}
-                    <p>${esc(msg.content)}</p>
-                    <div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>
-                </div>
-            `;
+            if (msg.file_url) {
+                html += renderFileMessage(msg.file_url, msg.file_url.split('/').pop(), isMine, msg.id, date);
+            } else {
+                html += `
+                    <div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}">
+                        ${senderName ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}
+                        <p>${esc(msg.content)}</p>
+                        <div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>
+                    </div>
+                `;
+            }
         }
         container.innerHTML = html || '<p class="media-empty">Нет сообщений</p>';
         container.scrollTop = container.scrollHeight;
@@ -787,7 +835,7 @@
         navigator.clipboard.writeText(text).then(() => window.kop.flash('Скопировано'));
     }
 
-    // ---------- ОТПРАВКА ФАЙЛОВ (ИСПРАВЛЕНА) ----------
+    // ---------- ОТПРАВКА ФАЙЛОВ ----------
     function initPrivateChatEvents(chatId) {
         const sendBtn = $('#send-msg-btn');
         const input = $('#typing-input');
@@ -818,7 +866,8 @@
                     });
                     if (!response.ok) throw new Error('Upload failed');
                     const resp = await response.json();
-                    container.insertAdjacentHTML('beforeend', `<div class="myMessageBubble message" data-msg-id="${resp.message_id}"><p>📎 <a href="${resp.file_url}" target="_blank">${esc(file.name)}</a></p><div class="messageInfo"><p></p><p>${formatTime(new Date())}</p></div></div>`);
+                    const msgHtml = renderFileMessage(resp.file_url, file.name, true, resp.message_id, new Date());
+                    container.insertAdjacentHTML('beforeend', msgHtml);
                     container.scrollTop = container.scrollHeight;
                     const cacheKey = 'private_' + chatId;
                     if (state.messagesCache[cacheKey]) {
@@ -852,11 +901,15 @@
         }
         $('#cancel-edit-btn')?.addEventListener('click', cancelEdit);
         if (container) {
+            let scrollTimeout = null;
             container.addEventListener('scroll', () => {
-                if (container.scrollTop <= 50 && !state.loadingMoreMessages) {
-                    const cache = state.messagesCache['private_' + chatId];
-                    if (cache?.hasMore) loadPrivateMessages(chatId, true);
-                }
+                if (scrollTimeout) clearTimeout(scrollTimeout);
+                scrollTimeout = setTimeout(() => {
+                    if (container.scrollTop <= 50 && !state.loadingMoreMessages) {
+                        const cache = state.messagesCache['private_' + chatId];
+                        if (cache?.hasMore) loadPrivateMessages(chatId, true);
+                    }
+                }, 150);
             });
         }
         sendBtn.addEventListener('click', async () => {
@@ -914,7 +967,8 @@
                     });
                     if (!response.ok) throw new Error('Upload failed');
                     const resp = await response.json();
-                    container.insertAdjacentHTML('beforeend', `<div class="myMessageBubble message" data-msg-id="${resp.message_id}"><p>📎 <a href="${resp.file_url}" target="_blank">${esc(file.name)}</a></p><div class="messageInfo"><p></p><p>${formatTime(new Date())}</p></div></div>`);
+                    const msgHtml = renderFileMessage(resp.file_url, file.name, true, resp.message_id, new Date());
+                    container.insertAdjacentHTML('beforeend', msgHtml);
                     container.scrollTop = container.scrollHeight;
                     const cacheKey = 'group_' + groupId;
                     if (state.messagesCache[cacheKey]) {
@@ -948,11 +1002,15 @@
         }
         $('#cancel-edit-btn')?.addEventListener('click', cancelEdit);
         if (container) {
+            let scrollTimeout = null;
             container.addEventListener('scroll', () => {
-                if (container.scrollTop <= 50 && !state.loadingMoreMessages) {
-                    const cache = state.messagesCache['group_' + groupId];
-                    if (cache?.hasMore) loadGroupMessages(groupId, true);
-                }
+                if (scrollTimeout) clearTimeout(scrollTimeout);
+                scrollTimeout = setTimeout(() => {
+                    if (container.scrollTop <= 50 && !state.loadingMoreMessages) {
+                        const cache = state.messagesCache['private_' + chatId];
+                        if (cache?.hasMore) loadPrivateMessages(chatId, true);
+                    }
+                }, 150);
             });
         }
         sendBtn.addEventListener('click', async () => {
@@ -1028,7 +1086,6 @@
             state.mediaObserver.disconnect();
             state.mediaObserver = null;
         }
-        // Запускаем polling для активного чата, если он есть
         if (state.activeChatType === 'private' && state.activeChatId) {
             startPollingForPrivate(state.activeChatId);
         } else if (state.activeChatType === 'group' && state.activeGroupId) {
@@ -1196,35 +1253,42 @@
             container.innerHTML = '<div class="media-empty">Нет участников</div>';
             return;
         }
-        let html = '<div class="members-grid">';
+        let html = '';
         for (const member of members) {
+            if (!member.id) continue;
             const avatarHtml = member.avatar
                 ? `<img class="member-avatar" src="${esc(member.avatar)}" alt="">`
                 : `<div class="member-avatar member-avatar--placeholder">${getInitials(member.first_name + ' ' + member.last_name)}</div>`;
-            const roleBadge = member.role === 'admin' ? '<span class="member-role-badge">Создатель</span>' : '';
+            const roleBadge = member.role === 'admin' ? '<span class="member-role-badge">админ</span>' : '';
+            
+            // Определяем, свой профиль или чужой
+            const isSelf = member.id == state.userId;
+            const profileUrl = isSelf ? `/profile.php` : `/user.php?id=${member.id}`;
+            
             html += `
-                <div class="member-item">
+                <div class="member-item" data-user-id="${member.id}">
                     ${avatarHtml}
                     <div class="member-info">
-                        <div class="member-name">${esc(member.first_name)} ${esc(member.last_name)}</div>
+                        <a href="${profileUrl}" class="member-name-link">${esc(member.first_name)} ${esc(member.last_name)}</a>
                         ${roleBadge}
                     </div>
                 </div>
             `;
         }
-        html += '</div>';
         container.innerHTML = html;
     }
 
-    // ---------- МЕНЮ ТРОЕТОЧИЯ (ДОБАВЛЕН ПУНКТ ЗАКРЕПЛЕНИЯ) ----------
-    function attachChatOptionsMenu(id, type, name, otherUserId = null, isPinned = false) {
+    // ---------- МЕНЮ ТРОЕТОЧИЯ ----------
+    function attachChatOptionsMenu(id, type, name, otherUserId = null) {
         const btn = document.getElementById('chat-options-btn');
         if (!btn) return;
         const newBtn = btn.cloneNode(true);
         btn.parentNode.replaceChild(newBtn, btn);
         newBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            showChatOptionsMenu(e, id, type, name, otherUserId, isPinned);
+            const item = state.allItems.find(i => i.id === id && i.type === type);
+            const currentIsPinned = item ? item.is_pinned : false;
+            showChatOptionsMenu(e, id, type, name, otherUserId, currentIsPinned);
         });
     }
 
@@ -1245,7 +1309,6 @@
             { icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>', label: 'Архивировать', action: 'archive' },
             { icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>', label: 'Скачать историю', action: 'export' }
         ];
-        // Вставляем пункт закрепления/открепления вторым (после медиахаба)
         const pinLabel = isPinned ? 'Открепить чат' : 'Закрепить чат';
         const pinIcon = isPinned
             ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
@@ -1482,6 +1545,10 @@
             profileLinkId = (chat.user1_id == state.userId) ? chat.user2_id : chat.user1_id;
         }
 
+        // Определяем, свой профиль или чужой
+        const isSelf = (profileLinkId == state.userId);
+        const profileUrl = isSelf ? '/profile.php' : `/user.php?id=${profileLinkId}`;
+
         const avatarHtml = (chat.avatar && chat.avatar.trim())
             ? `<img class="chatHeaderAvatar" src="${esc(chat.avatar)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">`
             : `<div class="chatHeaderAvatar" style="width:40px;height:40px;border-radius:50%;background:#e0e7ff;color:#3b5dd3;display:flex;align-items:center;justify-content:center;font-weight:600;">${getInitials(chat.first_name+' '+chat.last_name)}</div>`;
@@ -1491,7 +1558,7 @@
                 <div class="chatHeader">
                     <button class="chatHeaderQuit">Назад</button>
                     ${avatarHtml}
-                    <a href="/profile.php?id=${profileLinkId}" class="chatHeaderUsername" style="text-decoration:none; color:inherit;">${esc(chat.first_name)} ${esc(chat.last_name)}</a>
+                    <a href="${profileUrl}" class="chatHeaderUsername" style="text-decoration:none; color:inherit;">${esc(chat.first_name)} ${esc(chat.last_name)}</a>
                     <button class="chatHeaderOptions" id="chat-options-btn" title="Действия"><div class="multiDot"></div><div class="multiDot"></div><div class="multiDot"></div></button>
                 </div>
                 <div class="chat-messages-panel">
@@ -1519,7 +1586,7 @@
             </div>
         `;
         initPrivateChatEvents(chatId);
-        attachChatOptionsMenu(chatId, 'private', `${chat.first_name} ${chat.last_name}`, profileLinkId, chat.is_pinned);
+        attachChatOptionsMenu(chatId, 'private', `${chat.first_name} ${chat.last_name}`, profileLinkId);
         await loadPrivateMessages(chatId);
         startPollingForPrivate(chatId);
         const urlParams = new URLSearchParams(window.location.search);
@@ -1571,7 +1638,7 @@
             </div>
         `;
         initGroupChatEvents(groupId);
-        attachChatOptionsMenu(groupId, 'group', group.name, null, group.is_pinned);
+        attachChatOptionsMenu(groupId, 'group', group.name, null);
         initMediaTabs();
         await loadGroupMessages(groupId);
         startPollingForGroup(groupId);

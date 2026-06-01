@@ -111,6 +111,49 @@ $router->api('GET', '/api/friends', function() {
 });
 
 // ---------- МЕССЕНДЖЕР ----------
+$router->api('GET', '/api/messages/{chatId}/poll', function($chatId) {
+    require_auth();
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+    
+    $userId = $_SESSION['user_id'];
+    $chatId = (int)$chatId;
+    $chat = find('chats', $chatId);
+    if (!$chat || ($chat['user1_id'] != $userId && $chat['user2_id'] != $userId)) {
+        http_response_code(403);
+        return ['error' => 'Доступ запрещён'];
+    }
+    $lastId = isset($_GET['after']) ? (int)$_GET['after'] : 0;
+    $stmt = db()->prepare("SELECT id, sender_id, content, file_url, created_at FROM messages WHERE chat_id = ? AND id > ? ORDER BY id ASC");
+    $stmt->execute([$chatId, $lastId]);
+    $messages = $stmt->fetchAll();
+    if (!empty($messages)) {
+        db()->prepare("UPDATE messages SET is_read = 1 WHERE chat_id = ? AND sender_id != ?")->execute([$chatId, $userId]);
+    }
+    return ['messages' => $messages];
+});
+
+$router->api('GET', '/api/messages/{chatId}', function($chatId) {
+    require_auth();
+    $userId = $_SESSION['user_id'];
+    $chatId = (int)$chatId;
+    $chat = find('chats', $chatId);
+    if (!$chat || ($chat['user1_id'] != $userId && $chat['user2_id'] != $userId)) {
+        http_response_code(403);
+        return ['error' => 'Доступ запрещён'];
+    }
+    $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+    $perPage = isset($_GET['per_page']) ? min(200, max(1, (int)$_GET['per_page'])) : 20;
+    $offset = ($page - 1) * $perPage;
+    $stmt = db()->prepare("SELECT id, sender_id, content, file_url, is_read, created_at FROM messages WHERE chat_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?");
+    $stmt->execute([$chatId, $perPage, $offset]);
+    $messages = $stmt->fetchAll();
+    $messages = array_reverse($messages);
+    db()->prepare("UPDATE messages SET is_read = 1 WHERE chat_id = ? AND sender_id != ?")->execute([$chatId, $userId]);
+    return ['messages' => $messages];
+});
+
 $router->api('GET', '/api/chats', function() {
     require_auth();
     $userId = $_SESSION['user_id'];
@@ -131,50 +174,6 @@ $router->api('GET', '/api/chats', function() {
     return ['chats' => $chats];
 });
 
-$router->api('GET', '/api/messages/{chatId}', function($chatId) {
-    require_auth();
-    $userId = $_SESSION['user_id'];
-    $chatId = (int)$chatId;
-    $chat = find('chats', $chatId);
-    if (!$chat || ($chat['user1_id'] != $userId && $chat['user2_id'] != $userId)) {
-        http_response_code(403);
-        return ['error' => 'Доступ запрещён'];
-    }
-    $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
-    $perPage = isset($_GET['per_page']) ? min(200, max(1, (int)$_GET['per_page'])) : 20;
-    $offset = ($page - 1) * $perPage;
-    $stmt = db()->prepare("SELECT id, sender_id, content, is_read, created_at FROM messages WHERE chat_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?");
-    $stmt->execute([$chatId, $perPage, $offset]);
-    $messages = $stmt->fetchAll();
-    $messages = array_reverse($messages);
-    db()->prepare("UPDATE messages SET is_read = 1 WHERE chat_id = ? AND sender_id != ?")->execute([$chatId, $userId]);
-    return ['messages' => $messages];
-});
-
-$router->api('GET', '/api/messages/{chatId}/poll', function($chatId) {
-    require_auth();
-    // Отключаем кеширование
-    header('Cache-Control: no-cache, no-store, must-revalidate');
-    header('Pragma: no-cache');
-    header('Expires: 0');
-    
-    $userId = $_SESSION['user_id'];
-    $chatId = (int)$chatId;
-    $chat = find('chats', $chatId);
-    if (!$chat || ($chat['user1_id'] != $userId && $chat['user2_id'] != $userId)) {
-        http_response_code(403);
-        return ['error' => 'Доступ запрещён'];
-    }
-    $lastId = isset($_GET['after']) ? (int)$_GET['after'] : 0;
-    $stmt = db()->prepare("SELECT id, sender_id, content, is_read, created_at FROM messages WHERE chat_id = ? AND id > ? ORDER BY id ASC");
-    $stmt->execute([$chatId, $lastId]);
-    $messages = $stmt->fetchAll();
-    if (!empty($messages)) {
-        db()->prepare("UPDATE messages SET is_read = 1 WHERE chat_id = ? AND sender_id != ?")->execute([$chatId, $userId]);
-    }
-    return ['messages' => $messages];
-});
-
 $router->api('GET', '/api/groups/{groupId}/messages/poll', function($groupId) {
     require_auth();
     header('Cache-Control: no-cache, no-store, must-revalidate');
@@ -190,7 +189,7 @@ $router->api('GET', '/api/groups/{groupId}/messages/poll', function($groupId) {
     }
     $lastId = isset($_GET['after']) ? (int)$_GET['after'] : 0;
     $stmt = db()->prepare("
-        SELECT gm.id, gm.sender_id, gm.content, gm.created_at, u.first_name, u.last_name, u.avatar
+        SELECT gm.id, gm.sender_id, gm.content, gm.file_url, gm.created_at, u.first_name, u.last_name, u.avatar
         FROM group_messages gm
         JOIN users u ON u.id = gm.sender_id
         WHERE gm.group_id = ? AND gm.id > ?
@@ -267,6 +266,11 @@ $router->api('DELETE', '/api/messages/{messageId}', function($messageId) {
     if (time() - strtotime($msg['created_at']) > 86400) {
         http_response_code(403);
         return ['error' => 'Время удаления истекло'];
+    }
+    // Удаляем файл, если есть
+    if (!empty($msg['file_url'])) {
+        $filePath = __DIR__ . $msg['file_url'];
+        if (file_exists($filePath)) unlink($filePath);
     }
     db()->prepare("DELETE FROM messages WHERE id = ?")->execute([(int)$messageId]);
     $chatId = $msg['chat_id'];
@@ -357,20 +361,28 @@ $router->api('POST', '/api/groups/send-file', function() {
     if (!$member) { http_response_code(403); return ['error' => 'Доступ запрещён']; }
     if (empty($_FILES['file'])) throw new ValidationException(['file' => 'Файл не загружен']);
     $file = $_FILES['file'];
-    $allowed = ['image/jpeg','image/png','image/gif','video/mp4','application/pdf'];
-    if (!in_array($file['type'], $allowed)) throw new ValidationException(['file' => 'Недопустимый тип файла']);
+    // Проверка реального MIME
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $realMime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+    $allowed = ['image/jpeg','image/png','image/gif','image/webp','video/mp4','application/pdf'];
+    if (!in_array($realMime, $allowed)) {
+        throw new ValidationException(['file' => 'Недопустимый тип файла (определён по содержимому)']);
+    }
     if ($file['size'] > 10 * 1024 * 1024) throw new ValidationException(['file' => 'Файл слишком большой']);
     $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-    $filename = 'group_'.$groupId.'_'.uniqid().'.'.$ext;
+    $filename = 'group_' . $groupId . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
     $uploadDir = __DIR__.'/uploads/messages/';
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
     $dest = $uploadDir . $filename;
-    move_uploaded_file($file['tmp_name'], $dest);
+    if (!move_uploaded_file($file['tmp_name'], $dest)) {
+        throw new ValidationException(['file' => 'Ошибка сохранения файла']);
+    }
     $fileUrl = '/uploads/messages/'.$filename;
     $content = "📎 Файл: {$file['name']}";
     $msgId = insert('group_messages', ['group_id' => $groupId, 'sender_id' => $userId, 'content' => $content, 'file_url' => $fileUrl]);
     db()->prepare("UPDATE chat_groups SET last_message_at = NOW() WHERE id = ?")->execute([$groupId]);
-    return ['success' => true, 'message_id' => $msgId, 'file_url' => $fileUrl];
+    return ['success' => true, 'message_id' => $msgId, 'file_url' => $fileUrl, 'file_name' => $file['name']];
 });
 
 $router->api('GET', '/api/groups', function() {
@@ -403,7 +415,7 @@ $router->api('GET', '/api/groups/{groupId}/messages', function($groupId) {
     $perPage = isset($_GET['per_page']) ? min(200, max(1, (int)$_GET['per_page'])) : 20;
     $offset = ($page - 1) * $perPage;
     $stmt = db()->prepare("
-        SELECT gm.id, gm.sender_id, gm.content, gm.created_at, u.first_name, u.last_name, u.avatar
+        SELECT gm.id, gm.sender_id, gm.content, gm.file_url, gm.created_at, u.first_name, u.last_name, u.avatar
         FROM group_messages gm
         JOIN users u ON u.id = gm.sender_id
         WHERE gm.group_id = ?
@@ -745,10 +757,11 @@ $router->api('GET', '/api/media/group/{groupId}', function($groupId) {
 // ---------- ПОЛУЧЕНИЕ УЧАСТНИКОВ ГРУППЫ ----------
 $router->api('GET', '/api/groups/{groupId}/members', function($groupId) {
     require_auth();
-    $userId = $_SESSION['user_id'];
+    $currentUserId = $_SESSION['user_id'];
     $groupId = (int)$groupId;
     
-    $member = scalar("SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?", [$groupId, $userId]);
+    // Проверка, что текущий пользователь – участник группы
+    $member = scalar("SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ?", [$groupId, $currentUserId]);
     if (!$member) {
         http_response_code(403);
         return ['error' => 'Доступ запрещён'];
@@ -757,16 +770,22 @@ $router->api('GET', '/api/groups/{groupId}/members', function($groupId) {
     $group = find('chat_groups', $groupId);
     $creatorId = $group['created_by'] ?? null;
     
+    // Явно выбираем id из таблицы users, а не из group_members
     $stmt = db()->prepare("
-        SELECT u.id, u.first_name, u.last_name, u.avatar
+        SELECT 
+            u.id, 
+            u.first_name, 
+            u.last_name, 
+            u.avatar
         FROM group_members gm
-        JOIN users u ON u.id = gm.user_id
+        INNER JOIN users u ON u.id = gm.user_id
         WHERE gm.group_id = ?
         ORDER BY u.first_name ASC
     ");
     $stmt->execute([$groupId]);
     $members = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
+    // Добавляем роль
     foreach ($members as &$member) {
         $member['role'] = ($member['id'] == $creatorId) ? 'admin' : 'member';
     }
@@ -815,7 +834,6 @@ $router->api('POST', '/api/messages/send-file', function() {
     $receiver = find('users', $receiverId);
     if (!$receiver) throw new ValidationException(['receiver_id' => 'Пользователь не найден']);
     
-    // Проверка приватности (аналогично отправке текста)
     $privacyMessages = $receiver['privacy_messages'] ?? 'all';
     if ($privacyMessages === 'nobody') {
         http_response_code(403);
@@ -834,20 +852,27 @@ $router->api('POST', '/api/messages/send-file', function() {
     
     if (empty($_FILES['file'])) throw new ValidationException(['file' => 'Файл не загружен']);
     $file = $_FILES['file'];
-    $allowed = ['image/jpeg','image/png','image/gif','video/mp4','application/pdf'];
-    if (!in_array($file['type'], $allowed)) throw new ValidationException(['file' => 'Недопустимый тип файла']);
+    // Проверка реального MIME
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $realMime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+    $allowed = ['image/jpeg','image/png','image/gif','image/webp','video/mp4','application/pdf'];
+    if (!in_array($realMime, $allowed)) {
+        throw new ValidationException(['file' => 'Недопустимый тип файла (определён по содержимому)']);
+    }
     if ($file['size'] > 10 * 1024 * 1024) throw new ValidationException(['file' => 'Файл слишком большой']);
     
     $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-    $filename = 'msg_'.uniqid().'_'.$senderId.'.'.$ext;
+    $filename = 'msg_' . bin2hex(random_bytes(8)) . '_' . $senderId . '.' . $ext;
     $uploadDir = __DIR__.'/uploads/messages/';
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
     $dest = $uploadDir . $filename;
-    move_uploaded_file($file['tmp_name'], $dest);
+    if (!move_uploaded_file($file['tmp_name'], $dest)) {
+        throw new ValidationException(['file' => 'Ошибка сохранения файла']);
+    }
     $fileUrl = '/uploads/messages/'.$filename;
     $content = "📎 Файл: {$file['name']}";
     
-    // Создаём или находим чат
     $user1 = min($senderId, $receiverId);
     $user2 = max($senderId, $receiverId);
     $stmt = db()->prepare("SELECT id FROM chats WHERE user1_id = ? AND user2_id = ?");
@@ -873,9 +898,161 @@ $router->api('POST', '/api/messages/send-file', function() {
         'success' => true,
         'message_id' => $msgId,
         'file_url' => $fileUrl,
+        'file_name' => $file['name'],
         'chat_id' => $chatId,
         'other_user_id' => $receiverId
     ];
 });
 
+// ---------- ЛЕНТА НОВОСТЕЙ (для feed.php) ----------
+$router->api('GET', '/api/feed/posts', function() {
+    require_auth();
+    $userId = $_SESSION['user_id'];
+    $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+    $limit = isset($_GET['limit']) ? min(50, max(1, (int)$_GET['limit'])) : 10;
+    $offset = ($page - 1) * $limit;
+
+    // Получаем список друзей (подтверждённых)
+    $friends = select(
+        "SELECT u.id FROM friendships f
+         JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
+         WHERE (f.requester_id = ? OR f.addressee_id = ?) AND f.status = 'accepted'",
+        [$userId, $userId, $userId]
+    );
+    $friendIds = array_column($friends, 'id');
+    $friendIds[] = $userId; // включаем себя
+
+    // Посты: свои + друзей (если у них открыто для друзей) + публичные посты всех
+    $placeholders = implode(',', array_fill(0, count($friendIds), '?'));
+    $stmt = db()->prepare("
+        SELECT p.*, u.first_name, u.last_name, u.avatar
+        FROM posts p
+        JOIN users u ON u.id = p.user_id
+        WHERE 
+            (p.user_id = ?) OR
+            (p.user_id IN ($placeholders) AND u.privacy_posts IN ('friends', 'public')) OR
+            (u.privacy_posts = 'public')
+        ORDER BY p.created_at DESC
+        LIMIT ? OFFSET ?
+    ");
+    $params = array_merge([$userId], $friendIds, [$limit, $offset]);
+    $stmt->execute($params);
+    $posts = $stmt->fetchAll();
+
+    // Для каждого поста нужно проверить, лайкнул ли текущий пользователь
+    foreach ($posts as &$post) {
+        $stmt2 = db()->prepare("SELECT reaction FROM post_reactions WHERE post_id = ? AND user_id = ?");
+        $stmt2->execute([$post['id'], $userId]);
+        $react = $stmt2->fetch();
+        $post['user_reaction'] = $react ? $react['reaction'] : null;
+    }
+
+    return ['posts' => $posts, 'has_more' => count($posts) === $limit];
+});
+
+// ---------- ФОТОАЛЬБОМ ----------
+$router->api('POST', '/api/upload-photo', function() {
+    require_auth();
+    $userId = $_SESSION['user_id'];
+    if (empty($_FILES['photo'])) {
+        http_response_code(400);
+        return ['error' => 'Нет файла'];
+    }
+    $file = $_FILES['photo'];
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $realMime = finfo_file($finfo, $file['tmp_name']);
+    finfo_close($finfo);
+    $allowed = ['image/jpeg','image/png','image/gif','image/webp'];
+    if (!in_array($realMime, $allowed)) {
+        http_response_code(400);
+        return ['error' => 'Недопустимый тип файла'];
+    }
+    if ($file['size'] > 10 * 1024 * 1024) {
+        http_response_code(400);
+        return ['error' => 'Файл слишком большой (макс. 10 МБ)'];
+    }
+    $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+    $filename = 'photo_' . $userId . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+    $uploadDir = __DIR__ . '/uploads/photos/';
+    if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
+    $dest = $uploadDir . $filename;
+    if (!move_uploaded_file($file['tmp_name'], $dest)) {
+        http_response_code(500);
+        return ['error' => 'Ошибка сохранения файла'];
+    }
+    $fileUrl = '/uploads/photos/' . $filename;
+    db()->prepare("INSERT INTO user_photos (user_id, file_url, created_at) VALUES (?, ?, NOW())")->execute([$userId, $fileUrl]);
+    $photoId = db()->lastInsertId();
+    return ['success' => true, 'photo' => ['id' => $photoId, 'url' => $fileUrl]];
+});
+
+$router->api('GET', '/api/get-photos', function() {
+    require_auth();
+    $userId = $_SESSION['user_id'];
+    $stmt = db()->prepare("SELECT id, file_url, created_at FROM user_photos WHERE user_id = ? ORDER BY created_at DESC");
+    $stmt->execute([$userId]);
+    $photos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($photos as &$photo) {
+        $photo['url'] = $photo['file_url'];  // добавляем ключ url
+        unset($photo['file_url']);           // опционально удаляем старый
+    }
+    return ['photos' => $photos];
+    // Логирование (в файл или в ответ)
+    error_log(print_r($photos, true));
+    return ['photos' => $photos];
+});
+
+$router->api('POST', '/api/delete-photo', function() {
+    require_auth();
+    $data = json_decode(file_get_contents('php://input'), true);
+    $photoId = (int)($data['photo_id'] ?? 0);
+    if (!$photoId) {
+        http_response_code(400);
+        return ['error' => 'Не указан ID фото'];
+    }
+    $stmt = db()->prepare("SELECT user_id, file_url FROM user_photos WHERE id = ?");
+    $stmt->execute([$photoId]);
+    $photo = $stmt->fetch();
+    if (!$photo || $photo['user_id'] != $_SESSION['user_id']) {
+        http_response_code(403);
+        return ['error' => 'Доступ запрещён'];
+    }
+    $filePath = __DIR__ . $photo['file_url'];
+    if (file_exists($filePath)) unlink($filePath);
+    db()->prepare("DELETE FROM user_photos WHERE id = ?")->execute([$photoId]);
+    return ['success' => true];
+});
+
+// Создаём таблицу, если её нет
+db()->exec("CREATE TABLE IF NOT EXISTS user_photos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    file_url VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL,
+    INDEX(user_id)
+)");
+
+$router->api('GET', '/api/get-user-photos', function() {
+    require_auth();
+    $userId = (int)($_GET['user_id'] ?? 0);
+    if (!$userId) {
+        http_response_code(400);
+        return ['error' => 'Не указан user_id'];
+    }
+    // Проверка, что пользователь существует (опционально)
+    $user = find('users', $userId);
+    if (!$user) {
+        http_response_code(404);
+        return ['error' => 'Пользователь не найден'];
+    }
+    $stmt = db()->prepare("SELECT id, file_url, created_at FROM user_photos WHERE user_id = ? ORDER BY created_at DESC");
+    $stmt->execute([$userId]);
+    $photos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($photos as &$photo) {
+        $photo['url'] = $photo['file_url']; // для удобства клиента
+    }
+    return ['photos' => $photos];
+});
+
 $router->dispatch($_SERVER['REQUEST_METHOD'], $_SERVER['REQUEST_URI']);
+exit;

@@ -103,8 +103,9 @@
 
 /* ===== СТРАНИЦЫ АВТОРИЗАЦИИ (pre-auth) ===== */
 .welcome {
-    color: white;
-    font-size: 2em;
+    color: #3b5dd3;
+    font-size: 2.5em;
+    font-weight: 600;
 }
 
 .loginPageArea,
@@ -115,7 +116,7 @@
     justify-content: center;
     align-items: center;
     gap: 20px;
-    background-color: blueviolet;
+    background-color: #f0f0f0;
     width: 100%;
     height: 100vh;
 }
@@ -134,7 +135,7 @@
 
 .helpLinks a {
     text-decoration: none;
-    color: white;
+    color: black;
 }
 
 .authLoginSection input {
@@ -149,11 +150,14 @@
     border: none;
     padding: 10px;
     cursor: pointer;
+    background-color: #3b5dd3;
+    color: white;
+    font-size: 1em;
 }
 
 .aboutUs {
     text-decoration: none;
-    color: white;
+    color: black;
 }
 
 .sex {
@@ -164,6 +168,7 @@
 
 fieldset {
     border: none;
+    color: #000000;
 }
 
 input[name="first_name"],
@@ -182,7 +187,7 @@ input[name="last_name"] {
 
 /* ===== 2FA ===== */
 .twoFactorsMainArea {
-    background-color: blueviolet;
+    background-color: #f0f0f0;
     width: 100%;
     height: 100vh;
     display: flex;
@@ -207,7 +212,7 @@ input[name="last_name"] {
 }
 
 .twoFactorsMainArea p {
-    color: white;
+    color: black;
     font-size: 1.2em;
 }
 
@@ -216,6 +221,8 @@ input[name="last_name"] {
     border: none;
     cursor: pointer;
     border-radius: 10px;
+    background-color: #3b5dd3;
+    color: white;
 }
 
 /* ===== ПОСТ (общий) ===== */
@@ -458,7 +465,7 @@ input[name="last_name"] {
     max-width: 550px;
     max-height: 90vh;
     overflow-y: auto;
-    padding: 30px;
+    padding: 40px;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
     position: relative;
     scrollbar-width: none;
@@ -477,7 +484,7 @@ input[name="last_name"] {
 .modal-close {
     position: absolute;
     top: 12px;
-    right: 6px;
+    right: 10px;
     font-size: 3.6em;
     color: #000000;
     cursor: pointer;
@@ -630,19 +637,6 @@ body.no-scroll {
     box-sizing: border-box;
 }
 
-.profileAvatar {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    width: 200px;
-    height: 200px;
-    border-radius: 50%;
-    object-fit: cover;
-    flex-shrink: 0;
-    border: 3px solid #f0f2f5;
-    background-color: #eef1f8;
-}
-
 .profileCardInfo {
     display: flex;
     flex-direction: column;
@@ -689,7 +683,7 @@ body.no-scroll {
     align-items: flex-start;
     gap: 10px;
     font-size: 1em;
-    line-height: 1.5;
+    line-height: 2.2;
 }
 
 .bioIcon {
@@ -701,6 +695,13 @@ body.no-scroll {
     border-radius: 8px;
     flex-shrink: 0;
     margin-top: 2px;
+}
+
+.bioIcon svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+    margin: 0 auto;
 }
 
 .bioLabel {
@@ -857,12 +858,16 @@ body.no-scroll {
     border-radius: 20px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
     max-width: 800px;
+    width: 800px;
     margin-bottom: 24px;
 }
 
 .facebookLabel {
+    display: flex;
+    align-items: center;
     margin-top: 10px;
     margin-left: 25px;
+    margin-right: 25px;
     margin-bottom: 16px;
 }
 
@@ -870,8 +875,8 @@ body.no-scroll {
     font-size: 2em;
     font-weight: 500;
     color: #1e1e2f;
-    padding: 0;
     margin: 0;
+    padding: 0;
 }
 
 .facebook {
@@ -887,17 +892,10 @@ body.no-scroll {
 
 .facebookPicture {
     width: 250px;
-    aspect-ratio: 1 / 1;
-    background-color: gray;
     cursor: pointer;
     transition: transform 0.2s, box-shadow 0.2s;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
     box-sizing: border-box;
-}
-
-.facebookPicture:hover {
-    transform: scale(1.02);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
 }
 
 /* ===== МЕССЕНДЖЕР ===== */
@@ -1243,7 +1241,7 @@ body.no-scroll {
     justify-content: center;
     align-items: center;
     min-height: 100vh;
-    background-color: #d4e2ff;
+    background-color: #f0f0f0;
     margin-left: 20%;
     gap: 5px;
     font-size: 1.2em;
@@ -1354,7 +1352,8 @@ body.no-scroll {
 }
 
 .saveAccountChanges {
-    background-color: #4ef1bb;
+    background-color: #3b5dd3;
+    color: white;
     border: none;
     padding: 6px 14px;
     border-radius: 20px;
@@ -1362,11 +1361,6 @@ body.no-scroll {
     font-weight: 500;
     cursor: pointer;
     transition: background 0.2s;
-}
-
-.saveAccountChanges:hover {
-    background-color: #8bf8d4;
-    transition: 0.2s ease;
 }
 
 /* ===== СЕКЦИЯ РЕДАКТИРОВАНИЯ ЛИЧНЫХ ДАННЫХ ===== */
@@ -1455,7 +1449,7 @@ body.no-scroll {
 }
 
 .saveBtn {
-    background: #7c3aed;
+    background: #3b5dd3;
     color: white;
     border: none;
     padding: 12px 24px;
@@ -1466,10 +1460,6 @@ body.no-scroll {
     transition: background 0.2s;
     width: 100%;
     margin-top: 8px;
-}
-
-.saveBtn:hover {
-    background: #6c2ed1;
 }
 
 .escapeButton {
@@ -1569,13 +1559,13 @@ body.no-scroll {
 .privacyCheckbox {
     width: 18px;
     height: 18px;
-    accent-color: #7c3aed;
+    accent-color: #3b5dd3;
     cursor: pointer;
 }
 
 .privacyLink {
     font-size: 0.9rem;
-    color: #7c3aed;
+    color: black;
     text-decoration: none;
     font-weight: 500;
 }
@@ -1650,8 +1640,84 @@ body.no-scroll {
 .notificationsCheckbox {
     width: 18px;
     height: 18px;
-    accent-color: #7c3aed;
+    accent-color: #3b5dd3;
     cursor: pointer;
+}
+
+.profileAvatar {
+    width: 200px;          /* задай нужный размер (было 200px? уменьши) */
+    height: 200px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    background-color: #eef1f8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.profileAvatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;     /* чтобы картинка не искажалась */
+    display: block;
+}
+
+/* Если есть placeholder-текст */
+.profileAvatar .accountAvatarPlaceholder {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #4a4f63;
+}
+
+/* Иконки в профиле */
+.bioIcon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.bioIcon svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+    margin: 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* Аватар – миниатюра */
+.profileAvatar {
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: #eef1f8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.profileAvatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.profileAvatar .accountAvatarPlaceholder {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #4a4f63;
 }
 
 /* ===== ОБ АККАУНТЕ (account-info) ===== */
@@ -1827,21 +1893,17 @@ body.no-scroll {
 }
 
 .btn--primary {
-    background: #7c3aed;
+    background: #3b5dd3;
     color: white;
 }
 
 .btn--primary:hover {
-    background: #6c2ed1;
+    background: #3b5edf;
 }
 
 .btn--secondary {
-    background: #f0f2f5;
-    color: #1e1e2f;
-}
-
-.btn--secondary:hover {
-    background: #e4e6ed;
+    background: #3b5dd3;
+    color: white;
 }
 
 .btn--success {
@@ -1878,8 +1940,8 @@ body.no-scroll {
 }
 
 .statusBadge--friend {
-    background: #ecfdf5;
-    color: #059669;
+    background: white;
+    color: black;
 }
 
 /* ===== СТРАНИЦА ПОИСКА ===== */
@@ -2115,53 +2177,6 @@ body.no-scroll {
     color: #b91c1c;
 }
 
-/* ===== ГЛОБАЛЬНЫЙ ТОСТ ===== */
-.global-toast {
-    position: fixed;
-    bottom: 30px;
-    right: 30px;
-    background: #1e1e2f;
-    color: #fff;
-    padding: 14px 24px;
-    border-radius: 14px;
-    z-index: 11000;
-    opacity: 0;
-    visibility: hidden;
-    transform: translateY(20px);
-    transition: opacity 0.3s, visibility 0.3s, transform 0.3s;
-    pointer-events: none;
-    max-width: calc(100% - 60px);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.global-toast.visible {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
-}
-
-.chatTypingPin,
-.sendMessageButton,
-#cancel-edit-btn {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    transition: background 0.2s;
-    flex-shrink: 0;
-}
-.chatTypingPin:hover,
-.sendMessageButton:hover,
-#cancel-edit-btn:hover {
-    background: #f0f2f5;
-}
-
 /* ===== МЕДИАХАБ ===== */
 .media-tabs {
     display: flex;
@@ -2337,4 +2352,146 @@ body.no-scroll {
     padding: 2px 8px;
     border-radius: 12px;
     margin-left: 8px;
+}
+
+/* Иконка булавки у закреплённого чата */
+.chatUnit {
+    position: relative;
+}
+.chatUnit.pinned::before {
+    content: "📌";
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+    opacity: 0.6;
+}
+/* Альтернативно — изменить фон */
+.chatUnit.pinned {
+    background-color: #fef9e6; /* лёгкий жёлтый оттенок */
+    border-left: 3px solid #ffc107;
+}
+
+.message-image-preview {
+    max-width: 300px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.message-video-preview {
+    max-width: 300px;
+    max-height: 200px;
+    border-radius: 12px;
+}
+.file-attachment {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #f0f2f5;
+    border-radius: 20px;
+    text-decoration: none;
+    color: #1a73e8;
+}
+/* Модалка для просмотра изображения */
+.image-viewer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.9);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+.image-viewer img {
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+}
+
+/* Минималистичный список участников */
+.members-list-container {
+    padding: 0;
+    background: transparent;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.member-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.1s ease;
+}
+
+.member-item:hover {
+    background: #fafafa;
+}
+
+.member-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.member-avatar--placeholder {
+    background: #e4e6eb;
+    color: #4b4f56;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    font-size: 16px;
+}
+
+.member-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.member-name-link {
+    font-weight: 500;
+    font-size: 0.95rem;
+    color: #111;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.member-role-badge {
+    font-size: 0.7rem;
+    color: #65676b;
+    background: #e4e6eb;
+    padding: 2px 8px;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+.opPicture-placeholder {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #e0e7ff;
+    color: #3b5dd3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 1.2rem;
+    flex-shrink: 0;
 }
