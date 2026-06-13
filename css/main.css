@@ -462,8 +462,9 @@ input[name="last_name"] {
 .modal-container {
     background: #fff;
     border-radius: 20px;
-    max-width: 550px;
-    max-height: 90vh;
+    max-width: 600px;
+    width: 600px;
+    max-height: 85vh;
     overflow-y: auto;
     padding: 40px;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
@@ -2494,4 +2495,451 @@ body.no-scroll {
     font-weight: 600;
     font-size: 1.2rem;
     flex-shrink: 0;
+}
+
+/* Стили для модалки создания группы */
+.friend-item {
+    user-select: none;
+}
+.friend-item:hover {
+    background-color: #f8f9ff;
+}
+.member-avatar--placeholder {
+    width: 40px;
+    height: 40px;
+    background: #e0e7ff;
+    color: #3b5dd3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+#group-friends-list::-webkit-scrollbar {
+    width: 6px;
+}
+#group-friends-list::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+#group-friends-list::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 10px;
+}
+#group-friends-search:focus {
+    border-color: #3b5dd3;
+    outline: none;
+}
+
+/* Превью файлов – квадратные миниатюры под строкой */
+#attachments-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 4px;
+}
+
+.attachment-item {
+    position: relative;
+    width: 200px;
+    height: 200px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #f0f2f5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.attachment-item img,
+.attachment-item video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.remove-attachment {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+
+.remove-attachment:hover {
+    background: rgba(220, 38, 38, 0.9);
+}
+
+/* Строка постинга – широкая, как профиль */
+.postingSection {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 600px;         /* как у .profileCard */
+    margin: 20px auto 0;
+    background: white;
+    border-radius: 20px;
+    padding: 16px 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+    box-sizing: border-box;
+}
+
+.postingRow {
+    display: flex;
+    align-items: center;
+    gap: 16px;                /* чуть больше отступ */
+    width: 100%;
+}
+
+.postingRow .profilePinButton,
+.postingRow .sendButton {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 50%;
+    transition: background 0.2s;
+}
+
+#profilePostingInput {
+    flex: 1;
+    min-height: 40px;
+    max-height: 120px;
+    border-radius: 24px;
+    border: 1px solid #e0e0e0;
+    padding: 10px 18px;
+    font-size: 1rem;
+    font-family: inherit;
+    resize: none;
+    background-color: #fafafa;
+    transition: border-color 0.2s;
+    outline: none;
+}
+
+/* Превью файлов – без изменений */
+#attachments-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.file-icon {
+    font-size: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    background: #eef1f8;
+    color: #3b5dd3;
+}
+
+/* ===== УЛУЧШЕННЫЙ СПИСОК ДРУЗЕЙ ===== */
+#section-friends {
+    background-color: white;
+    padding-top: 20px;
+    margin-bottom: 20px;
+    border-radius: 20px;
+}
+
+.friends-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0 16px;
+    margin-bottom: 20px;
+}
+.friends-count {
+    padding: 6px 14px;
+    margin-left: 10px;
+    border-radius: 30px;
+    font-size: 0.85rem;
+    color: white;
+    background-color: #3b5dd3;
+    font-weight: 500;
+}
+.friends-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 20px;
+    padding: 0 16px 20px;
+}
+.friend-card {
+    background: #fff;
+    padding: 0px 12px 0px 0px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    border: 1px solid rgba(0, 0, 0, 0.03);
+}
+
+.btn--friend {
+    background: #10b981;
+    color: white;
+}
+.btn--friend:hover {
+    background: #059669;
+}
+
+.friend-avatar {
+    width: 50px;
+    height: 50px;
+    margin: 10px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: #f0f2f5;
+    margin-bottom: 12px;
+    border: 2px solid #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+.friend-avatar-placeholder {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #e0e7ff, #c7d2fe);
+    color: #3b5dd3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 1.8rem;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+.friend-info {
+    width: 100%;
+}
+.friend-name {
+    font-weight: 600;
+    font-size: 1rem;
+    color: #1e1e2f;
+    text-decoration: none;
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 0.2s;
+}
+
+.remove-friend-btn {
+    background: rgba(239, 68, 68, 0.08);
+    border: none;
+    cursor: pointer;
+    color: #ef4444;
+    padding: 6px 12px;
+    border-radius: 30px;
+    transition: all 0.2s;
+    font-size: 0.8rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0.8;
+}
+.remove-friend-btn:hover {
+    opacity: 1;
+    background: #fee2e2;
+    transform: scale(1.02);
+}
+.remove-friend-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+/* Адаптивность для мобильных устройств */
+@media (max-width: 640px) {
+    .friends-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+    }
+    .friend-card {
+        padding: 12px 8px;
+    }
+    .friend-avatar, .friend-avatar-placeholder {
+        width: 60px;
+        height: 60px;
+        font-size: 1.4rem;
+    }
+    .friend-name {
+        font-size: 0.85rem;
+    }
+    .remove-friend-btn {
+        padding: 4px 10px;
+        font-size: 0.7rem;
+    }
+}
+
+/* ===== КАРУСЕЛЬ (квадрат 1:1, обрезка до квадрата) ===== */
+.carousel-container {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    background: #000;
+    margin-bottom: 8px;
+}
+
+.carousel-track {
+    display: flex;
+    transition: transform 0.3s ease;
+    width: 100%;
+    height: 100%;
+}
+
+.carousel-slide {
+    flex: 0 0 100%;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.carousel-slide img,
+.carousel-slide video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;        /* обрезка до квадрата как в Instagram */
+    cursor: pointer;
+}
+
+/* Кнопки навигации (SVG) */
+.carousel-prev,
+.carousel-next {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(0,0,0,0.6);
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    transition: background 0.2s;
+    padding: 0;
+}
+.carousel-prev:hover,
+.carousel-next:hover {
+    background: rgba(0,0,0,0.9);
+}
+.carousel-prev { left: 10px; }
+.carousel-next { right: 10px; }
+
+.carousel-prev svg,
+.carousel-next svg {
+    width: 24px;
+    height: 24px;
+    stroke: white;
+    stroke-width: 2;
+    fill: none;
+}
+
+/* Точки пагинации */
+.carousel-dots {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 2;
+}
+.carousel-dot {
+    width: 8px;
+    height: 8px;
+    background: rgba(255,255,255,0.5);
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+}
+.carousel-dot.active {
+    background: white;
+}
+
+/* Полноэкранный просмотрщик (плавное открытие/закрытие) */
+.media-fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0);
+    z-index: 10001;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background 0.3s ease;
+}
+.media-fullscreen.visible {
+    background: rgba(0, 0, 0, 0.95);
+}
+.media-fullscreen .media-content {
+    opacity: 0;
+    transform: scale(0.9);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    max-width: 90%;
+    max-height: 90%;
+}
+.media-fullscreen.visible .media-content {
+    opacity: 1;
+    transform: scale(1);
+}
+.media-fullscreen .close-btn {
+    position: absolute;
+    top: 20px;
+    right: 30px;
+    font-size: 40px;
+    color: #fff;
+    cursor: pointer;
+    font-family: sans-serif;
+    z-index: 10002;
+    opacity: 0;
+    transition: opacity 0.2s ease 0.1s;
+}
+.media-fullscreen.visible .close-btn {
+    opacity: 1;
+}
+
+/* Кнопки карусели: скрыты, показываются при наведении на контейнер */
+.carousel-prev,
+.carousel-next {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.carousel-container:hover .carousel-prev,
+.carousel-container:hover .carousel-next {
+    opacity: 1;
+}
+
+.post-preview-card {
+    transition: transform 0.1s, box-shadow 0.2s;
+}
+.post-preview-card:hover {
+    transform: scale(1.01);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }

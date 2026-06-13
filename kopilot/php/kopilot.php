@@ -132,7 +132,7 @@ function insert(string $table, array $data): int {
 }
 
 function update(string $table, mixed $id, array $data): void {
-    $sets = implode(', ', array_map(fn($col) => "$col = ?", array_keys($data)));
+    $sets = implode(', ', array_map(fn($col) => "`$col` = ?", array_keys($data)));
     $stmt = db()->prepare("UPDATE $table SET $sets WHERE id = ?");
     $stmt->execute([...array_values($data), $id]);
 }
@@ -357,7 +357,7 @@ class Router {
                 json_response(['errors' => $e->getErrors()], 422);
             } catch (Exception $e) {
                 error_log($e->getMessage());
-                json_response(['error' => 'Внутренняя ошибка сервера'], 500);
+                json_response(['error' => $e->getMessage()], 500);
             }
         });
     }
@@ -436,6 +436,16 @@ function getOrCreateChat(int $user1, int $user2): int {
         'last_message_at' => date('Y-m-d H:i:s')
     ]);
     return $chatId;
+}
+
+function log_admin_action(string $action, ?int $targetUserId = null, ?string $details = null): void
+{
+    $db = db();
+    $stmt = $db->prepare(
+        "INSERT INTO admin_log (admin_id, action, target_user_id, details, created_at)
+         VALUES (?, ?, ?, ?, NOW())"
+    );
+    $stmt->execute([$_SESSION['user_id'], $action, $targetUserId, $details]);
 }
 
 function renderPost(array $post, array $author): string {

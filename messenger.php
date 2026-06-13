@@ -83,6 +83,71 @@ $pageTitle = 'Мессенджер - Friendscape';
         #create-group-btn {
             margin-top: 12px !important;
         }
+        /* Стили для превью вложений (под строкой ввода) */
+        .attachments-preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 4px 20px 12px 20px;
+            background: #fff;
+            border-top: none;
+        }
+        .attachment-item {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #f0f2f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border: 1px solid #e0e0e0;
+        }
+        .attachment-item img,
+        .attachment-item video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .attachment-item .file-icon {
+            font-size: 32px;
+        }
+        .remove-attachment {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            background: rgba(0,0,0,0.6);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .remove-attachment:hover {
+            background: rgba(220, 38, 38, 0.9);
+        }
+        /* Стили для модального окна поста */
+        #post-modal .modal-container {
+            max-width: 520px;
+            padding: 0;
+            overflow-y: auto;
+            border-radius: 20px;
+        }
+        #post-modal .post {
+            margin: 0;
+            border-radius: 0;
+            box-shadow: none;
+        }
+        #post-modal .carousel-container {
+            border-radius: 0;
+        }
     </style>
 </head>
 <body>
@@ -107,15 +172,31 @@ $pageTitle = 'Мессенджер - Friendscape';
 
     <!-- Модальное окно создания группы -->
     <div id="group-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-container" style="max-width: 500px;">
+        <div class="modal-container" style="max-width: 560px; padding: 24px;">
             <span class="modal-close" id="group-modal-close">&times;</span>
-            <h3 style="margin-top: 0;">Создать группу</h3>
-            <input type="text" id="group-name" placeholder="Название группы" style="width:100%; padding:12px; margin: 15px 0; border-radius:12px; border:1px solid #e0e0e0; box-sizing:border-box;">
-            <label style="font-weight:500; margin-bottom:8px; display:block;">Участники (друзья):</label>
-            <div id="group-friends-list" style="max-height: 250px; overflow-y: auto; border:1px solid #f0f2f5; border-radius:12px; padding:8px;"></div>
-            <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">
-                <button id="group-cancel-btn" class="btn btn--secondary">Отмена</button>
-                <button id="group-create-btn" class="btn btn--primary">Создать</button>
+            <h3 style="margin-top: 0; margin-bottom: 20px;">Создать группу</h3>
+            
+            <!-- Название группы -->
+            <input type="text" id="group-name" placeholder="Название группы" style="width:100%; padding:12px; margin-bottom: 20px; border-radius:12px; border:1px solid #e0e0e0; box-sizing:border-box; font-size:1rem;">
+            
+            <!-- Поиск друзей -->
+            <div style="margin-bottom: 16px;">
+                <input type="text" id="group-friends-search" placeholder="Поиск друзей..." style="width:100%; padding:10px 12px; border-radius:20px; border:1px solid #e0e0e0; box-sizing:border-box; outline:none;">
+            </div>
+            
+            <!-- Счётчик выбранных -->
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
+                <label style="font-weight:500;">Участники:</label>
+                <span id="selected-count" style="background:#eef1f8; padding:2px 10px; border-radius:20px; font-size:0.85rem;">0 выбрано</span>
+            </div>
+            
+            <!-- Список друзей с аватарками -->
+            <div id="group-friends-list" style="max-height: 300px; overflow-y: auto; border:1px solid #f0f2f5; border-radius:16px; padding:8px 0; background:#fff;"></div>
+            
+            <!-- Кнопки действий -->
+            <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+                <button id="group-cancel-btn" class="btn btn--secondary" style="padding: 8px 20px;">Отмена</button>
+                <button id="group-create-btn" class="btn btn--primary" style="padding: 8px 20px;">Создать</button>
             </div>
         </div>
     </div>
@@ -130,6 +211,14 @@ $pageTitle = 'Мессенджер - Friendscape';
                 <button id="report-cancel-btn" class="btn btn--secondary" style="padding: 8px 20px;">Отмена</button>
                 <button id="report-submit-btn" class="btn btn--primary" style="padding: 8px 20px;">Отправить</button>
             </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно для просмотра поста -->
+    <div id="post-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-container">
+            <span class="modal-close" id="post-modal-close">&times;</span>
+            <div id="post-modal-content"></div>
         </div>
     </div>
 

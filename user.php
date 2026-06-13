@@ -16,6 +16,12 @@ if (!$profileUser) {
     exit;
 }
 
+// Функция склонения для счётчика друзей
+function declension($number, $titles) {
+    $cases = [2, 0, 1, 1, 1, 2];
+    return $titles[($number % 100 > 4 && $number % 100 < 20) ? 2 : $cases[($number % 10 < 5) ? $number % 10 : 5]];
+}
+
 // Статус дружбы
 $stmt = db()->prepare(
     "SELECT * FROM friendships WHERE 
@@ -25,30 +31,44 @@ $stmt = db()->prepare(
 $stmt->execute([$currentUser['id'], $profileUser['id'], $profileUser['id'], $currentUser['id']]);
 $friendship = $stmt->fetch();
 $isFriend = $friendship && $friendship['status'] === 'accepted';
+$friendshipRequesterId = $isFriend ? $friendship['requester_id'] : null;
 
-// Приватность
+// Приватность постов
 $privacyPosts = $profileUser['privacy_posts'] ?? 'all';
 $showPosts = $privacyPosts === 'friends' ? $isFriend : ($privacyPosts !== 'self');
 
-// Безопасная выборка постов
+// Выборка постов
 $posts = select(
     "SELECT * FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 10",
     [$profileId]
 );
 
-// Онлайн-статус
-$onlineStatus = '○ был(а) давно';
-if ($profileUser['last_active']) {
-    $diff = time() - strtotime($profileUser['last_active']);
-    if ($diff < 300) {
-        $onlineStatus = '● в сети';
-    } elseif ($diff < 3600) {
-        $onlineStatus = '○ был(а) недавно';
-    } elseif (date('Y-m-d') == date('Y-m-d', strtotime($profileUser['last_active']))) {
-        $onlineStatus = '○ был(а) сегодня';
+// Получаем список друзей просматриваемого пользователя
+$friends = select(
+    "SELECT u.id, u.first_name, u.last_name, u.avatar
+     FROM friendships f
+     JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
+     WHERE (f.requester_id = ? OR f.addressee_id = ?) AND f.status = 'accepted'
+     ORDER BY u.first_name ASC",
+    [$profileId, $profileId, $profileId]
+);
+
+// Онлайн-статус (начальное значение, будет перезаписан JavaScript)
+$onlineText = 'Загрузка...';
+$onlineClass = 'profileStatus--offline';
+
+// Проверка, поручился ли текущий пользователь за просматриваемого
+$alreadyEndorsed = false;
+if ($isFriend) {
+    $tableExists = scalar("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'dfsn_endorsements'");
+    if ($tableExists) {
+        $endorsement = scalar(
+            "SELECT COUNT(*) FROM dfsn_endorsements WHERE from_user_id = ? AND to_user_id = ?",
+            [$currentUser['id'], $profileUser['id']]
+        );
+        $alreadyEndorsed = $endorsement > 0;
     }
 }
-$displayOnline = ($profileUser['show_online'] ?? true) ? $onlineStatus : '○ был(а) недавно';
 
 $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) . ' - Friendscape';
 ?>
@@ -59,10 +79,19 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= $pageTitle ?></title>
     <link rel="stylesheet" href="css/main.css">
+    <style>
+        #report-reason:focus {
+            border-color: #3b5dd3;
+            background: #fff;
+        }
+        .profileStatus { font-size:0.85rem; font-weight:500; padding:4px 12px; border-radius:20px; display:inline-flex; align-items:center; gap:6px; }
+        .profileStatus--online { background:#ecfdf5; color:#10b981; }
+        .profileStatus--recent { background:#fff7ed; color:#ea580c; }
+        .profileStatus--offline { background:#f3f4f6; color:#6b7280; }
+    </style>
 </head>
 <body>
     <div class="sidebar"><?php require_once "components/header.php"; ?></div>
-
     <div class="mainArea">
         <div class="profileContainer">
             <div class="profileCard">
@@ -78,7 +107,7 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                 <div class="profileCardInfo">
                     <div class="profileName">
                         <span class="profileNameText"><?= esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) ?></span>
-                        <span class="profileStatus"><?= $displayOnline ?></span>
+                        <span id="profile-status-badge" class="profileStatus <?= $onlineClass ?>"><?= $onlineText ?></span>
                     </div>
                     <div class="bio">
                         <div class="bioItem">
@@ -89,9 +118,8 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                                 </svg>
                             </span>
                             <span class="bioLabel">О себе:</span>
-                            <span class="bioValue"><?= esc($user['about'] ?? '') ?></span>
+                            <span class="bioValue"><?= esc($profileUser['about'] ?? '') ?></span>
                         </div>
-
                         <div class="bioItem">
                             <span class="bioIcon" style="background: #f0f0f0; color: #3b5dd3;">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -100,9 +128,8 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                                 </svg>
                             </span>
                             <span class="bioLabel">Город:</span>
-                            <span class="bioValue"><?= esc($user['city'] ?? '') ?></span>
+                            <span class="bioValue"><?= esc($profileUser['city'] ?? '') ?></span>
                         </div>
-
                         <div class="bioItem">
                             <span class="bioIcon" style="background: #f0f0f0; color: #3b5dd3;">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -112,9 +139,8 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                                 </svg>
                             </span>
                             <span class="bioLabel">Статус отношений:</span>
-                            <span class="bioValue"><?= esc($user['relationship'] ?? '') ?></span>
+                            <span class="bioValue"><?= esc($profileUser['relationship'] ?? '') ?></span>
                         </div>
-
                         <div class="bioItem">
                             <span class="bioIcon" style="background: #f0f0f0; color: #3b5dd3;">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -125,9 +151,8 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                                 </svg>
                             </span>
                             <span class="bioLabel">Интересы:</span>
-                            <span class="bioValue"><?= esc($user['interests'] ?? '') ?></span>
+                            <span class="bioValue"><?= esc($profileUser['interests'] ?? '') ?></span>
                         </div>
-
                         <div class="bioItem">
                             <span class="bioIcon" style="background: #f0f0f0; color: #3b5dd3;">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -136,7 +161,7 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                                 </svg>
                             </span>
                             <span class="bioLabel">Мне не нравится:</span>
-                            <span class="bioValue"><?= esc($user['dislikes'] ?? '') ?></span>
+                            <span class="bioValue"><?= esc($profileUser['dislikes'] ?? '') ?></span>
                         </div>
                     </div>
                 </div>
@@ -158,8 +183,15 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                         <button class="btn btn--success" id="accept-friend-btn" data-user-id="<?= $profileUser['id'] ?>">Принять</button>
                         <button class="btn btn--danger" id="decline-friend-btn" data-user-id="<?= $profileUser['id'] ?>">Отклонить</button>
                     <?php endif; ?>
-                <?php else: ?>
-                    <span class="statusBadge statusBadge--friend">Вы друзья</span>
+                <?php elseif ($friendship['status'] === 'accepted'): ?>
+                    <button class="btn btn--friend" id="friend-actions-btn" data-friend-id="<?= $profileUser['id'] ?>" data-requester-id="<?= $friendshipRequesterId ?>" data-already-endorsed="<?= $alreadyEndorsed ? '1' : '0' ?>">
+                        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                            </svg>
+                        </span>
+                        Вы друзья
+                    </button>
                 <?php endif; ?>
 
                 <button class="btn btn--secondary" onclick="window.location='messenger.php?chat_id=<?= getOrCreateChat($currentUser['id'], $profileUser['id']) ?>'">
@@ -172,10 +204,12 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
 
             <div class="profileNavigation">
                 <button class="profileNavigation__btn profileNavigation__btn--active" data-act="posts">Публикации</button>
+                <button class="profileNavigation__btn" data-act="friends">Друзья</button>
                 <button class="profileNavigation__btn" data-act="photos">Фотоальбомы</button>
                 <button class="profileNavigation__btn" data-act="info">Личная информация</button>
             </div>
 
+            <!-- Посты -->
             <div class="profileContent" id="posts-container">
                 <?php if (!$showPosts): ?>
                     <div style="text-align:center;padding:40px 20px;"><p style="color:#8b8fa3;">Публикации ограничены</p></div>
@@ -184,7 +218,6 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                 <?php else: ?>
                     <?php foreach ($posts as $post): ?>
                         <div class="post" data-post-id="<?= $post['id'] ?>" data-author-id="<?= $post['user_id'] ?>">
-                            <!-- Точно такая же структура, как в profile.php -->
                             <div class="postHeader">
                                 <img class="opPicture" src="<?= esc($profileUser['avatar'] ?? '') ?>" alt="">
                                 <div class="opLabel">
@@ -249,19 +282,46 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                 <?php endif; ?>
             </div>
 
+            <!-- Секция Друзья -->
+            <div id="section-friends" style="display: none;">
+                <div class="friends-header">
+                    <h3 style="margin:0; font-size:1.2rem;">Друзья <?= esc($profileUser['first_name']) ?></h3>
+                    <span class="friends-count"><?= count($friends) ?> <?= declension(count($friends), ['друг', 'друга', 'друзей']) ?></span>
+                </div>
+                <?php if (empty($friends)): ?>
+                    <div style="text-align:center;padding:40px 20px;"><p style="color:#8b8fa3;">Нет друзей</p></div>
+                <?php else: ?>
+                    <div class="friends-grid">
+                        <?php foreach ($friends as $friend): ?>
+                            <div class="friend-card" data-friend-id="<?= $friend['id'] ?>">
+                                <?php if (!empty($friend['avatar'])): ?>
+                                    <img class="friend-avatar" src="<?= esc($friend['avatar']) ?>" alt="">
+                                <?php else: ?>
+                                    <div class="friend-avatar-placeholder"><?= esc(mb_substr($friend['first_name']??'',0,1).mb_substr($friend['last_name']??'',0,1)) ?></div>
+                                <?php endif; ?>
+                                <div class="friend-info">
+                                    <a href="user.php?id=<?= $friend['id'] ?>" class="friend-name"><?= esc($friend['first_name'].' '.$friend['last_name']) ?></a>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+
+            <!-- Фотоальбом -->
             <div class="facebookSection" style="display: none;">
                 <div class="facebookLabel">
                     <p>Фото <?= esc($profileUser['first_name']) ?></p>
                 </div>
                 <div id="photos-grid" class="facebook"></div>
             </div>
-            <!-- Вкладка Личная информация -->
+
+            <!-- Личная информация -->
             <div class="personalInfoSection" style="display: none;">
                 <div class="editCard">
                     <h3 class="accountTitle">Личная информация</h3>
                     <div class="accountGroup">
                         <?php
-                        // Список полей (ключ => отображаемое название)
                         $fields = [
                             'hometown'   => 'Родной город',
                             'city'       => 'Город',
@@ -279,10 +339,8 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                             'idols'      => 'Кумиры',
                             'gadgets'    => 'Мои гаджеты'
                         ];
-
-                        // Минималистичные иконки (Feather / Lucide)
                         $icons = [
-                            'hometown'   => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+                            'hometown'   => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
                             'city'       => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/></svg>',
                             'country'    => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
                             'languages'  => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>',
@@ -298,7 +356,6 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                             'idols'      => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
                             'gadgets'    => '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>'
                         ];
-
                         $hasData = false;
                         foreach ($fields as $key => $label):
                             $value = $profileUser[$key] ?? '';
@@ -321,13 +378,12 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
         </div>
     </div>
 
-    <!-- Модальные окна (точно как в profile.php) -->
+    <!-- Модальные окна (комментарии, поделиться) -->
     <div class="modal-overlay" id="comments-modal" style="display: none;">
         <div class="modal-container">
             <span class="modal-close" id="modal-close">&times;</span>
             <div id="modal-post-container"></div>
             <div class="comments-block">
-                <div class="comments-list" id="comments-list"></div>
                 <div class="comment-form">
                     <textarea id="comment-input" placeholder="Написать комментарий..."></textarea>
                     <button id="comment-send-btn">
@@ -339,6 +395,7 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                         </span>
                     </button>
                 </div>
+                <div class="comments-list" id="comments-list"></div>
             </div>
         </div>
     </div>
@@ -351,30 +408,39 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
         </div>
     </div>
 
-    <script src="/kopilot/js/kopilot.js"></script>
+    <!-- kopilot.js уже загружен в header.php -->
     <script>
-        // Код ИДЕНТИЧЕН profile.php, только без postingSection и с фиксированным меню для чужих постов
+        // CSRF-токен из скрытого поля
+        window.csrfToken = document.querySelector('input[name="_csrf"]').value;
+
+        // ID просматриваемого пользователя
+        const profileUserId = <?= (int)$profileId ?>;
+
+        // Глобальная функция экранирования
+        function esc(str) {
+            if (str == null) return '';
+            return String(str).replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
+        }
+
         const currentUserId = <?= (int)$_SESSION['user_id'] ?>;
         const postMenu = document.createElement('div');
         postMenu.className = 'post-actions-menu';
         document.body.appendChild(postMenu);
 
-        function hidePostMenu() {
-            postMenu.classList.remove('active');
-        }
-
+        function hidePostMenu() { postMenu.classList.remove('active'); }
         document.addEventListener('click', (e) => {
-            if (!postMenu.contains(e.target) && !e.target.closest('.postOptions button')) {
-                hidePostMenu();
-            }
+            if (!postMenu.contains(e.target) && !e.target.closest('.postOptions button')) hidePostMenu();
         });
 
         function showPostMenu(button, postId, authorId) {
             const rect = button.getBoundingClientRect();
             postMenu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
             postMenu.style.left = (rect.right + window.scrollX - 200) + 'px';
-
-            // Всегда меню для чужого поста
             let itemsHTML = `
                 <div class="post-actions-menu__item" data-action="copy-link" data-post-id="${postId}">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
@@ -387,21 +453,89 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
             `;
             postMenu.innerHTML = itemsHTML;
             postMenu.classList.add('active');
-
             postMenu.querySelectorAll('.post-actions-menu__item').forEach(item => {
                 item.addEventListener('click', (e) => {
                     const action = item.dataset.action;
                     const pid = item.dataset.postId;
                     if (action === 'copy-link') {
-                        navigator.clipboard.writeText(`${window.location.origin}/post.php?id=${pid}`)
+                        navigator.clipboard.writeText(`${location.origin}/post.php?id=${pid}`)
                             .then(() => kop.flash('Ссылка скопирована'))
-                            .catch(() => kop.flash('Не удалось скопировать ссылку'));
+                            .catch(() => kop.flash('Ошибка'));
                     } else if (action === 'report') {
-                        kop.flash('Жалоба отправлена');
+                        showReportModal(pid, 'post');
                     }
                     hidePostMenu();
                 });
             });
+        }
+
+        // Кастомная модалка жалобы
+        function showReportModal(targetId, type) {
+            const existing = document.querySelector('.report-modal-overlay');
+            if (existing) existing.remove();
+
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay report-modal-overlay';
+            overlay.style.display = 'flex';
+
+            overlay.innerHTML = `
+                <div class="modal-container" style="max-width:440px; padding:28px 24px;">
+                    <span class="modal-close" style="float:right; cursor:pointer; font-size:1.5em; line-height:1;">&times;</span>
+                    <h3 style="margin:0 0 12px; font-size:1.3em; display:flex; align-items:center; gap:8px;">
+                        <span style="background:#fee2e2; color:#b91c1c; padding:6px; border-radius:8px;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+                        </span>
+                        Жалоба
+                    </h3>
+                    <p style="color:#4b5563; margin:0 0 16px;">Опишите причину. Мы рассмотрим обращение в ближайшее время.</p>
+                    <textarea id="report-reason" placeholder="Что случилось?" style="width:100%; padding:14px; border-radius:14px; border:1px solid #e5e7eb; background:#f9fafb; font-family:inherit; font-size:0.95em; resize:vertical; min-height:110px; box-sizing:border-box; outline:none; transition:border-color 0.2s;"></textarea>
+                    <div style="display:flex; gap:12px; justify-content:flex-end; margin-top:20px;">
+                        <button class="btn btn--secondary" id="report-cancel" style="padding:10px 20px; border-radius:10px; background:#f3f4f6; border:none; cursor:pointer;">Отмена</button>
+                        <button class="btn btn--primary" id="report-submit" style="padding:10px 20px; border-radius:10px; background:#3b5dd3; color:#fff; border:none; cursor:pointer;">Отправить</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+            requestAnimationFrame(() => overlay.classList.add('active'));
+
+            const close = () => {
+                overlay.classList.remove('active');
+                setTimeout(() => overlay.remove(), 300);
+            };
+
+            overlay.querySelector('.modal-close').addEventListener('click', close);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+            overlay.querySelector('#report-cancel').addEventListener('click', close);
+
+            overlay.querySelector('#report-submit').addEventListener('click', async () => {
+                const reason = overlay.querySelector('#report-reason').value.trim();
+                if (!reason) {
+                    kop.flash('Укажите причину жалобы');
+                    return;
+                }
+                try {
+                    const res = await fetch('/api/report', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': window.csrfToken
+                        },
+                        body: JSON.stringify({ target_id: targetId, type: type, reason: reason })
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                        kop.flash('Жалоба отправлена');
+                    } else {
+                        kop.flash(data.error || 'Ошибка при отправке жалобы');
+                    }
+                } catch (e) {
+                    kop.flash('Ошибка соединения');
+                }
+                close();
+            });
+
+            setTimeout(() => overlay.querySelector('#report-reason').focus(), 100);
         }
 
         // ---------- РЕАКЦИИ ----------
@@ -411,22 +545,15 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                 btn.dataset.handlerAttached = '1';
                 btn.addEventListener('click', async function() {
                     const postId = this.dataset.postId;
-                    const reactionType = this.classList.contains('likeButton') ? 'like' : 'dislike';
-                    const endpoint = reactionType === 'like' ? '/api/posts/like' : '/api/posts/dislike';
-                    try {
-                        const response = await kop.post(endpoint, { post_id: postId });
-                        if (response.success) {
-                            const postDiv = this.closest('.post');
-                            postDiv.querySelector('.positiveCounter').textContent = response.likes_count;
-                            postDiv.querySelector('.negativeCounter').textContent = response.dislikes_count;
-                            const likeBtn = postDiv.querySelector('.likeButton');
-                            const dislikeBtn = postDiv.querySelector('.dislikeButton');
-                            likeBtn.classList.remove('active');
-                            dislikeBtn.classList.remove('active');
-                            if (response.user_liked) likeBtn.classList.add('active');
-                            if (response.user_disliked) dislikeBtn.classList.add('active');
-                        }
-                    } catch (e) {}
+                    const type = this.classList.contains('likeButton') ? 'like' : 'dislike';
+                    const res = await kop.post(`/api/posts/${type}`, { post_id: postId });
+                    if (res.success) {
+                        const postDiv = this.closest('.post');
+                        postDiv.querySelector('.positiveCounter').textContent = res.likes_count;
+                        postDiv.querySelector('.negativeCounter').textContent = res.dislikes_count;
+                        postDiv.querySelector('.likeButton').classList.toggle('active', res.user_liked);
+                        postDiv.querySelector('.dislikeButton').classList.toggle('active', res.user_disliked);
+                    }
                 });
             });
         }
@@ -436,10 +563,7 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
             document.querySelectorAll('.commentSheet').forEach(btn => {
                 if (btn.dataset.commentHandlerAttached) return;
                 btn.dataset.commentHandlerAttached = '1';
-                btn.addEventListener('click', async function() {
-                    const postId = this.dataset.postId;
-                    openCommentsModal(postId);
-                });
+                btn.addEventListener('click', () => openCommentsModal(btn.dataset.postId));
             });
         }
 
@@ -450,168 +574,233 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
             const originalPost = document.querySelector(`.post[data-post-id="${postId}"]`);
             if (originalPost) {
                 const body = originalPost.querySelector('.postBody');
-                if (body) {
-                    postContainer.innerHTML = body.outerHTML;
-                } else {
-                    postContainer.innerHTML = '<p>Пост не найден</p>';
-                }
-            } else {
-                postContainer.innerHTML = '<p>Пост не найден</p>';
-            }
+                postContainer.innerHTML = body ? body.outerHTML : '<p>Пост не найден</p>';
+            } else postContainer.innerHTML = '<p>Пост не найден</p>';
             try {
                 const data = await kop.get(`/api/posts/${postId}/comments`);
-                if (data.comments && data.comments.length > 0) {
+                if (data.comments && data.comments.length) {
                     commentsList.innerHTML = data.comments.map(c => {
-                        const initials = (c.first_name?.charAt(0) || '') + (c.last_name?.charAt(0) || '');
+                        const initials = (c.first_name?.charAt(0)||'')+(c.last_name?.charAt(0)||'');
                         return `
                         <div class="comment-item">
-                            <div class="comment-avatar">
-                                ${c.avatar ? `<img src="${c.avatar}" alt="">` : `<span class="comment-avatar-placeholder">${initials}</span>`}
-                            </div>
+                            <div class="comment-avatar">${c.avatar ? `<img src="${c.avatar}">` : `<span>${initials}</span>`}</div>
                             <div class="comment-content">
                                 <div class="comment-author"><a href="user.php?id=${c.user_id}">${c.first_name} ${c.last_name}</a></div>
                                 <div class="comment-text">${c.content}</div>
-                                <div class="comment-date">${new Date(c.created_at).toLocaleString('ru-RU')}</div>
+                                <div class="comment-date">${new Date(c.created_at).toLocaleString()}</div>
                             </div>
                         </div>`;
                     }).join('');
-                } else {
-                    commentsList.innerHTML = '<p class="no-comments">Нет комментариев. Будьте первым.</p>';
-                }
-            } catch (e) {
-                commentsList.innerHTML = '<p class="error">Ошибка загрузки комментариев</p>';
-            }
-
-            document.getElementById('comment-send-btn').onclick = async function() {
+                } else commentsList.innerHTML = '<p class="no-comments">Нет комментариев</p>';
+            } catch(e) { commentsList.innerHTML = '<p class="error">Ошибка загрузки</p>'; }
+            document.getElementById('comment-send-btn').onclick = async () => {
                 const input = document.getElementById('comment-input');
                 const content = input.value.trim();
                 if (!content) return;
-                try {
-                    const response = await kop.post(`/api/posts/${postId}/comments`, { content });
-                    if (response.success) {
-                        const c = response.comment;
-                        const initials = (c.first_name?.charAt(0) || '') + (c.last_name?.charAt(0) || '');
-                        const newCommentHTML = `
-                            <div class="comment-item">
-                                <div class="comment-avatar">
-                                    ${c.avatar ? `<img src="${c.avatar}" alt="">` : `<span class="comment-avatar-placeholder">${initials}</span>`}
-                                </div>
-                                <div class="comment-content">
-                                    <div class="comment-author"><a href="user.php?id=${c.user_id}">${c.first_name} ${c.last_name}</a></div>
-                                    <div class="comment-text">${c.content}</div>
-                                    <div class="comment-date">${new Date(c.created_at).toLocaleString('ru-RU')}</div>
-                                </div>
+                const resp = await kop.post(`/api/posts/${postId}/comments`, { content });
+                if (resp.success) {
+                    const c = resp.comment;
+                    const initials = (c.first_name?.charAt(0)||'')+(c.last_name?.charAt(0)||'');
+                    const newComment = `
+                        <div class="comment-item">
+                            <div class="comment-avatar">${c.avatar ? `<img src="${c.avatar}">` : `<span>${initials}</span>`}</div>
+                            <div class="comment-content">
+                                <div class="comment-author"><a href="user.php?id=${c.user_id}">${c.first_name} ${c.last_name}</a></div>
+                                <div class="comment-text">${c.content}</div>
+                                <div class="comment-date">${new Date(c.created_at).toLocaleString()}</div>
                             </div>
-                        `;
-                        if (commentsList.querySelector('.no-comments')) {
-                            commentsList.innerHTML = '';
-                        }
-                        commentsList.insertAdjacentHTML('afterbegin', newCommentHTML);
-                        input.value = '';
-                    }
-                } catch (e) {}
+                        </div>`;
+                    if (commentsList.querySelector('.no-comments')) commentsList.innerHTML = '';
+                    commentsList.insertAdjacentHTML('afterbegin', newComment);
+                    input.value = '';
+                }
             };
-
             modal.style.display = 'flex';
             modal.classList.add('active');
             document.body.classList.add('no-scroll');
         }
-
         function closeModal() {
             const modal = document.getElementById('comments-modal');
-            if (!modal) return;
-            modal.classList.remove('active');
-            modal.style.display = 'none';
-            document.body.classList.remove('no-scroll');
+            if (modal) { modal.classList.remove('active'); modal.style.display = 'none'; document.body.classList.remove('no-scroll'); }
         }
-
         document.getElementById('modal-close').addEventListener('click', closeModal);
-        document.getElementById('comments-modal').addEventListener('click', function(e) {
-            if (e.target === this) closeModal();
-        });
+        document.getElementById('comments-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
 
         // ---------- ПОДЕЛИТЬСЯ ----------
         function attachShareButtons() {
             document.querySelectorAll('.sharePost').forEach(btn => {
                 if (btn.dataset.shareAttached) return;
                 btn.dataset.shareAttached = '1';
-                btn.addEventListener('click', function(e) {
+                btn.addEventListener('click', e => {
                     e.stopPropagation();
-                    const postDiv = this.closest('.post');
-                    const postId = postDiv.dataset.postId;
-                    openShareModal(postId);
+                    openShareModal(btn.dataset.postId);
                 });
             });
         }
-
         async function openShareModal(postId) {
             const modal = document.getElementById('share-modal');
             const chatList = document.getElementById('share-chat-list');
             let chats = [];
             try { const data = await kop.get('/api/chats'); chats = data.chats || []; } catch(e) {}
-            if (chats.length === 0) {
-                chatList.innerHTML = '<p style="color:#8b8fa3;text-align:center;padding:20px;">Нет активных чатов</p>';
-            } else {
+            if (!chats.length) chatList.innerHTML = '<p style="color:#8b8fa3;text-align:center;padding:20px;">Нет активных чатов</p>';
+            else {
                 chatList.innerHTML = chats.map(chat => `
                     <div class="share-chat-item" data-chat-id="${chat.chat_id}" data-other-user="${chat.other_user_id}"
-                         style="display:flex;align-items:center;gap:12px;padding:12px;cursor:pointer;border-radius:12px;transition:background 0.2s;"
-                         onmouseover="this.style.background='#f5f6fa'" onmouseout="this.style.background=''">
-                        <img src="${chat.avatar || ''}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;background:#f0f0f0;">
-                        <span style="font-weight:500;">${chat.first_name} ${chat.last_name}</span>
+                         style="display:flex;align-items:center;gap:12px;padding:12px;cursor:pointer;border-radius:12px;">
+                        <img src="${chat.avatar||''}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">
+                        <span>${chat.first_name} ${chat.last_name}</span>
                     </div>
                 `).join('');
                 chatList.querySelectorAll('.share-chat-item').forEach(item => {
                     item.addEventListener('click', async () => {
-                        const otherUserId = item.dataset.otherUser;
-                        await sendPostLink(postId, otherUserId);
-                        modal.style.display = 'none';
+                        const receiverId = item.dataset.otherUser;
+                        const postUrl = `${location.origin}/post.php?id=${postId}`;
+                        await kop.post('/api/messages/send', { receiver_id: receiverId, content: postUrl });
+                        kop.flash('Пост отправлен');
                         modal.classList.remove('active');
+                        modal.style.display = 'none';
                     });
                 });
             }
             modal.style.display = 'flex';
             modal.classList.add('active');
         }
-
-        async function sendPostLink(postId, receiverId) {
-            try {
-                const postUrl = `${window.location.origin}/post.php?id=${postId}`;
-                await kop.post('/api/messages/send', { receiver_id: receiverId, content: postUrl });
-                kop.flash('Пост отправлен');
-            } catch(e) { kop.flash('Ошибка'); }
-        }
-
         document.getElementById('share-modal-close')?.addEventListener('click', () => {
             const modal = document.getElementById('share-modal');
             modal.classList.remove('active');
             modal.style.display = 'none';
         });
-        document.getElementById('share-modal')?.addEventListener('click', function(e) {
-            if (e.target === this) {
-                this.classList.remove('active');
-                this.style.display = 'none';
+        document.getElementById('share-modal')?.addEventListener('click', e => {
+            if (e.target === e.currentTarget) {
+                modal.classList.remove('active');
+                modal.style.display = 'none';
             }
         });
 
-        // ---------- НАВИГАЦИЯ ----------
-        const navBtns = document.querySelectorAll('.profileNavigation__btn');
-        navBtns.forEach(btn => {
-            btn.addEventListener('click', function(e) {
-                e.preventDefault();
-                navBtns.forEach(b => b.classList.remove('profileNavigation__btn--active'));
-                this.classList.add('profileNavigation__btn--active');
-                const act = this.dataset.act;
-                document.querySelectorAll('.post').forEach(p => p.style.display = 'none');
-                document.querySelector('.facebookSection').style.display = 'none';
-                document.querySelector('.personalInfoSection').style.display = 'none';
-                if (act === 'posts') document.querySelectorAll('.post').forEach(p => p.style.display = '');
-                else if (act === 'photos') document.querySelector('.facebookSection').style.display = '';
-                else if (act === 'info') document.querySelector('.personalInfoSection').style.display = '';
-                closeModal();
-            });
-        });
+        // ---------- МОДАЛКА ДЛЯ КНОПКИ "ВЫ ДРУЗЬЯ" ----------
+        function showFriendActionsModal(friendId, requesterId) {
+            const alreadyEndorsed = document.getElementById('friend-actions-btn')?.dataset.alreadyEndorsed === '1';
+            const overlay = document.createElement('div');
+            overlay.className = 'modal-overlay';
+            overlay.style.display = 'flex';
 
-        // ---------- ДРУЖБА ----------
+            let buttonsHtml = '';
+            if (alreadyEndorsed) {
+                buttonsHtml = `
+                    <span style="color:#059669;font-weight:500;">✓ Вы уже поручились</span>
+                    <button class="btn btn--danger" id="remove-friend-btn">Удалить из друзей</button>
+                `;
+            } else {
+                buttonsHtml = `
+                    <button class="btn btn--success" id="vouch-btn">Поручиться</button>
+                    <button class="btn btn--danger" id="remove-friend-btn">Удалить из друзей</button>
+                `;
+            }
+
+            overlay.innerHTML = `
+                <div class="modal-container" style="max-width:400px; padding:20px;">
+                    <span class="modal-close" style="float:right; cursor:pointer;">&times;</span>
+                    <h3 style="margin-top:0;">Управление дружбой</h3>
+                    <p>Что вы хотите сделать?</p>
+                    <div style="display:flex; gap:12px; justify-content:center; margin-top:20px;">
+                        ${buttonsHtml}
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            setTimeout(() => overlay.classList.add('active'), 10);
+            const close = () => {
+                overlay.classList.remove('active');
+                setTimeout(() => overlay.remove(), 300);
+            };
+            overlay.querySelector('.modal-close').addEventListener('click', close);
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+            const vouchBtn = overlay.querySelector('#vouch-btn');
+            if (vouchBtn) {
+                vouchBtn.addEventListener('click', async () => {
+                    try {
+                        const resp = await fetch('/api/dfsn/endorse', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-Token': window.csrfToken
+                            },
+                            body: JSON.stringify({ user_id: friendId })
+                        });
+                        const data = await resp.json();
+                        if (resp.ok) {
+                            kop.flash(data.message || 'Поручительство принято');
+                            const friendActionsBtn = document.getElementById('friend-actions-btn');
+                            if (friendActionsBtn) friendActionsBtn.dataset.alreadyEndorsed = '1';
+                            close();
+                        } else {
+                            kop.flash(data.error || 'Ошибка поручительства');
+                        }
+                    } catch (e) {
+                        kop.flash('Не удалось поручиться');
+                    }
+                });
+            }
+
+            const removeBtn = overlay.querySelector('#remove-friend-btn');
+            if (removeBtn) {
+                removeBtn.addEventListener('click', async () => {
+                    try {
+                        const resp = await fetch('/api/friends/decline', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRF-Token': window.csrfToken
+                            },
+                            body: JSON.stringify({ friend_id: friendId, requester_id: requesterId })
+                        });
+                        const data = await resp.json();
+                        if (resp.ok) {
+                            kop.flash('Пользователь удалён из друзей');
+                            close();
+                            replaceFriendButtonWithAdd(friendId);
+                        } else {
+                            kop.flash(data.error || 'Ошибка при удалении');
+                        }
+                    } catch (e) {
+                        kop.flash('Ошибка соединения');
+                    }
+                });
+            }
+        }
+
+        function replaceFriendButtonWithAdd(userId) {
+            const container = document.querySelector('.profileActionsUnderAvatar');
+            const oldBtn = document.getElementById('friend-actions-btn');
+            if (!oldBtn) return;
+            
+            const newBtnHTML = `
+                <button class="btn btn--primary" id="add-friend-btn" data-user-id="${userId}">
+                    <span class="Menu__icon" style="background: #e8e0fc; color: #7c3aed;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                    </span>
+                    Добавить в друзья
+                </button>
+            `;
+            oldBtn.insertAdjacentHTML('afterend', newBtnHTML);
+            oldBtn.remove();
+            
+            const newBtn = document.getElementById('add-friend-btn');
+            if (newBtn) {
+                newBtn.addEventListener('click', async function() {
+                    try {
+                        await kop.post('/api/friends/add', { addressee_id: this.dataset.userId });
+                        kop.flash('Заявка отправлена');
+                        this.outerHTML = '<span class="statusBadge">Заявка отправлена</span>';
+                    } catch(e) {
+                        kop.flash('Ошибка');
+                    }
+                });
+            }
+        }
+
+        // ---------- ДРУЖБА (остальные кнопки) ----------
         const addBtn = document.getElementById('add-friend-btn');
         if (addBtn) addBtn.addEventListener('click', async () => {
             try { await kop.post('/api/friends/add', { addressee_id: addBtn.dataset.userId }); location.reload(); }
@@ -627,6 +816,35 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
             try { await kop.post('/api/friends/decline', { requester_id: declineBtn.dataset.userId }); location.reload(); }
             catch(e) { kop.flash('Ошибка'); }
         });
+        const friendActionsBtn = document.getElementById('friend-actions-btn');
+        if (friendActionsBtn) {
+            friendActionsBtn.addEventListener('click', () => {
+                showFriendActionsModal(friendActionsBtn.dataset.friendId, friendActionsBtn.dataset.requesterId);
+            });
+        }
+
+        // ---------- НАВИГАЦИЯ ПО ВКЛАДКАМ ----------
+        const navBtns = document.querySelectorAll('.profileNavigation__btn');
+        function setActiveTab(act) {
+            document.querySelectorAll('.post').forEach(p => p.style.display = 'none');
+            document.querySelector('.facebookSection').style.display = 'none';
+            document.getElementById('section-friends').style.display = 'none';
+            document.querySelector('.personalInfoSection').style.display = 'none';
+            if (act === 'posts') document.querySelectorAll('.post').forEach(p => p.style.display = '');
+            else if (act === 'friends') document.getElementById('section-friends').style.display = '';
+            else if (act === 'photos') document.querySelector('.facebookSection').style.display = '';
+            else if (act === 'info') document.querySelector('.personalInfoSection').style.display = '';
+            closeModal();
+        }
+        navBtns.forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                navBtns.forEach(b => b.classList.remove('profileNavigation__btn--active'));
+                this.classList.add('profileNavigation__btn--active');
+                setActiveTab(this.dataset.act);
+            });
+        });
+        setActiveTab('posts');
 
         // ---------- ИНИЦИАЛИЗАЦИЯ ----------
         function attachPostMenu() {
@@ -636,69 +854,80 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
                 btn.addEventListener('click', function(e) {
                     e.stopPropagation();
                     const postDiv = this.closest('.post');
-                    const postId = postDiv.dataset.postId;
-                    const authorId = postDiv.dataset.authorId;
-                    showPostMenu(this, postId, authorId);
+                    showPostMenu(this, postDiv.dataset.postId, postDiv.dataset.authorId);
                 });
             });
         }
-
         attachReactionHandlers();
         attachCommentHandler();
         attachPostMenu();
         attachShareButtons();
 
-        // Скрываем неактивные вкладки
+        // Скрываем неактивные секции
         document.querySelector('.facebookSection').style.display = 'none';
+        document.getElementById('section-friends').style.display = 'none';
         document.querySelector('.personalInfoSection').style.display = 'none';
+
+        // ---------------------- ДИНАМИЧЕСКОЕ ОБНОВЛЕНИЕ СТАТУСА ----------------------
+        async function updateStatus() {
+            try {
+                const resp = await fetch(`/api/users/${profileUserId}/status`, {
+                    headers: { 'X-CSRF-Token': window.csrfToken, 'Accept': 'application/json' }
+                });
+
+                if (!resp.ok) {
+                    const errText = await resp.text();
+                    console.error('Ошибка получения статуса:', resp.status, errText);
+                    return;
+                }
+
+                const data = await resp.json();
+                const badge = document.getElementById('profile-status-badge');
+                if (badge) {
+                    badge.textContent = data.text;
+                    badge.className = 'profileStatus ' + data.class;
+                }
+            } catch (e) {
+                console.error('updateStatus error:', e);
+            }
+        }
+
+        // Запускаем немедленно и каждые 2 минуты
+        updateStatus();
+        setInterval(updateStatus, 120000);
+        // ---------------------------------------------------------------------------
     </script>
 
     <script>
-    // ---------- ФОТОАЛЬБОМ (только просмотр) ----------
+    // Фотоальбом (только просмотр)
     (function() {
         const profileUserId = <?= (int)$profileId ?>;
         const photosGrid = document.getElementById('photos-grid');
         if (!photosGrid) return;
-
         function loadUserPhotos() {
             fetch(`/api/get-user-photos?user_id=${profileUserId}`, {
                 headers: { 'Accept': 'application/json', 'X-CSRF-Token': window.csrfToken }
             })
-            .then(response => {
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                return response.json();
-            })
+            .then(r => r.json())
             .then(data => {
                 if (data.photos && data.photos.length) {
                     photosGrid.innerHTML = '';
                     data.photos.forEach(photo => {
-                        const div = document.createElement('div');
-                        div.className = 'facebookPicture';
-                        div.style.position = 'relative';
-                        const img = document.createElement('img');
-                        img.src = photo.url || '';
-                        img.style.cssText = 'width:100%;height:100%;object-fit:cover;cursor:pointer';
+                        const div = document.createElement('div'); div.className = 'facebookPicture'; div.style.position = 'relative';
+                        const img = document.createElement('img'); img.src = photo.url; img.style.cssText = 'width:100%;height:100%;object-fit:cover;cursor:pointer';
                         img.addEventListener('click', () => {
-                            const viewer = document.createElement('div');
-                            viewer.className = 'image-viewer';
-                            viewer.innerHTML = `<img src="${photo.url || ''}" alt="">`;
+                            const viewer = document.createElement('div'); viewer.className = 'image-viewer';
+                            viewer.innerHTML = `<img src="${photo.url}">`;
                             viewer.addEventListener('click', () => viewer.remove());
                             document.body.appendChild(viewer);
                         });
                         div.appendChild(img);
                         photosGrid.appendChild(div);
                     });
-                } else {
-                    photosGrid.innerHTML = '<p style="width:100%;text-align:center;color:#8b8fa3;grid-column:1/-1;">Нет фото</p>';
-                }
+                } else photosGrid.innerHTML = '<p style="width:100%;text-align:center;color:#8b8fa3;">Нет фото</p>';
             })
-            .catch(err => {
-                console.error('Ошибка загрузки фото:', err);
-                photosGrid.innerHTML = '<p style="width:100%;text-align:center;color:#8b8fa3;">Не удалось загрузить фото</p>';
-            });
+            .catch(err => { console.error(err); photosGrid.innerHTML = '<p style="text-align:center;color:#8b8fa3;">Не удалось загрузить фото</p>'; });
         }
-
-        // Загружаем фото при первом отображении вкладки
         let loaded = false;
         const observer = new MutationObserver(() => {
             const fbSection = document.querySelector('.facebookSection');

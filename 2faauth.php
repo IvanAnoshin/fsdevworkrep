@@ -1,97 +1,83 @@
 <?php
+require_once __DIR__ . '/kopilot/kopilot_init.php';
 
-session_start();
-
+// Если не передан login_user_id — значит, пользователь не прошёл первый этап (логин/пароль)
 if (!isset($_SESSION['login_user_id'])) {
-    header('Location: login.php');
+    header('Location: /login.php');
     exit;
 }
 
-$dbHost = 'localhost';
-$dbName = 'fsdb';
-$dbUser = 'root';
-$dbPass = '';
-$dbCharset = 'utf8mb4';
-
+$userId = (int) $_SESSION['login_user_id'];
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $secret = $_POST['secret_question'] ?? '';
+    // CSRF проверка
+    if (!hash_equals(csrf_token(), $_POST['_csrf'] ?? '')) {
+        $errors['csrf'] = 'Недействительный CSRF-токен';
+    } else {
+        $secretAnswer = $_POST['secret_answer'] ?? '';
 
-    if ($secret === '') {
-        $errors['secret_question'] = 'Введите секретный ответ';
-    }
-
-    if (empty($errors)) {
-        try {
-            $pdo = new PDO(
-                "mysql:host=$dbHost;dbname=$dbName;charset=$dbCharset",
-                $dbUser,
-                $dbPass,
-                [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                    PDO::ATTR_EMULATE_PREPARES => false
-                ]
-            );
-
-            $stmt = $pdo->prepare("SELECT secret_question FROM users WHERE id = ?");
-            $stmt->execute([$_SESSION['login_user_id']]);
-            $user = $stmt->fetch();
-
-            if ($user && password_verify($secret, $user['secret_question'])) {
+        if ($secretAnswer === '') {
+            $errors['secret_answer'] = 'Введите секретный ответ';
+        } else {
+            // Ищем пользователя и проверяем секретный ответ
+            $user = find('users', $userId);
+            if ($user && !empty($user['secret_question']) && password_verify($secretAnswer, $user['secret_question'])) {
+                // Успешная двухфакторная аутентификация
                 $_SESSION['authenticated'] = true;
-                $_SESSION['user_id'] = $_SESSION['login_user_id'];
+                $_SESSION['user_id'] = $userId;
+                $_SESSION['login_time'] = date('Y-m-d H:i:s');
                 unset($_SESSION['login_user_id']);
 
-                header('Location: profile.php');
+                // Сохраняем сессию в БД для отображения в настройках
+                db()->prepare("INSERT INTO user_sessions (user_id, login_time) VALUES (?, ?)")
+                    ->execute([$userId, $_SESSION['login_time']]);
+
+                header('Location: /profile.php');
                 exit;
             } else {
-                $errors['secret_question'] = 'Неверный секретный ответ';
+                $errors['secret_answer'] = 'Неверный секретный ответ';
             }
-        } catch (PDOException $e) {
-            $errors['db'] = 'Ошибка базы данных. Попробуйте позже.';
         }
     }
 
-    $_SESSION['errors'] = $errors;
-    header('Location: 2faauth.php');
+    // Сохраняем ошибки в flash и редиректим обратно на эту же страницу
+    flash('errors', $errors);
+    header('Location: /2faauth.php');
     exit;
 }
 
-$errors = $_SESSION['errors'] ?? [];
-unset($_SESSION['errors']);
-
+// Извлекаем ошибки из flash (если были)
+$errors = flash('errors') ?? [];
 ?>
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Двухфакторная авторизация</title>
+    <title>Двухфакторная авторизация — Friendscape</title>
     <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
     <div class="twoFactorsMainArea">
         <p>Подтвердите вход</p>
-        <form class="secretAnswerForm" method="post" action="2faauth.php">
+        <form class="secretAnswerForm" method="post" action="/2faauth.php">
+            <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
             <input
                 type="password"
-                name="secret_question"
+                name="secret_answer"
                 placeholder="Секретный ответ"
-                class="<?= isset($errors['secret_question']) ? 'input-error' : '' ?>"
+                class="<?= isset($errors['secret_answer']) ? 'input-error' : '' ?>"
+                autocomplete="off"
             >
-            <?php if (isset($errors['secret_question'])): ?>
-                <span class="error-message"><?= htmlspecialchars($errors['secret_question']) ?></span>
+            <?php if (isset($errors['secret_answer'])): ?>
+                <span class="error-message"><?= esc($errors['secret_answer']) ?></span>
             <?php endif; ?>
-
-            <?php if (isset($errors['db'])): ?>
-                <span class="error-message"><?= htmlspecialchars($errors['db']) ?></span>
+            <?php if (isset($errors['csrf'])): ?>
+                <span class="error-message"><?= esc($errors['csrf']) ?></span>
             <?php endif; ?>
-
             <button type="submit">Войти</button>
-
         </form>
     </div>
 </body>

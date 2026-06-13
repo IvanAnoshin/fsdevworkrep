@@ -34,19 +34,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $filename = 'avatar_' . $_SESSION['user_id'] . '_' . time() . '.' . $ext;
                     $uploadDir = __DIR__ . '/uploads/avatars/';
                     
-                    // Создаём папку с правильными правами
                     if (!is_dir($uploadDir)) {
                         mkdir($uploadDir, 0755, true);
                     }
                     
                     $dest = $uploadDir . $filename;
                     if (move_uploaded_file($_FILES['avatar']['tmp_name'], $dest)) {
-                        // Удаляем старый аватар
                         if (!empty($user['avatar']) && file_exists(__DIR__ . '/' . $user['avatar'])) {
                             unlink(__DIR__ . '/' . $user['avatar']);
                         }
                         $updateData['avatar'] = 'uploads/avatars/' . $filename;
-                        flash('success', '');
+                        flash('success', 'Аватар обновлён');
                     } else {
                         flash('error', 'Не удалось сохранить файл. Проверьте права на папку uploads/avatars/');
                     }
@@ -185,7 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                 </form>
 
-                <!-- Безопасность и сессии – без изменений -->
+                <!-- Безопасность -->
                 <div class="accountGroup">
                     <p class="accountGroupHeader">Безопасность</p>
                     <a href="change-password.php" class="accountRow accountRow--action">
@@ -204,17 +202,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </a>
                 </div>
 
+                <!-- АКТИВНЫЕ СЕССИИ (ДИНАМИЧЕСКИЙ БЛОК) -->
                 <div class="accountGroup">
                     <p class="accountGroupHeader">Активные сессии</p>
-                    <div class="accountRow">
-                        <span class="accountIcon" style="background: #f0f0f0; color: #3b5dd3;">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                        </span>
-                        <div class="accountLabel">
-                            <span>Текущая сессия</span>
-                            <span class="accountValue">Windows · Chrome · <?= date('d.m.Y, H:i') ?></span>
-                        </div>
-                        <span class="accountBadge accountBadge--active">Активна</span>
+                    <div id="sessions-list">
+                        <p style="color:#8b8fa3; text-align:center; padding:10px;">Загрузка...</p>
                     </div>
                 </div>
             </div>
@@ -630,7 +622,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     </div>
 
+    <!-- Скрытое поле для CSRF -->
+    <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
+
     <script>
+        window.csrfToken = document.querySelector('input[name="_csrf"]').value;
+
         function hideAllSections() {
             kop.hide('.account-info');
             kop.hide('.editSection');
@@ -639,6 +636,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         hideAllSections();
+
+        // Загрузка сессий
+        async function loadSessions() {
+            const container = document.getElementById('sessions-list');
+            if (!container) return;
+            container.innerHTML = '<p style="color:#8b8fa3; text-align:center; padding:10px;">Загрузка...</p>';
+            try {
+                const res = await fetch('/api/user/sessions', {
+                    headers: { 'X-CSRF-Token': window.csrfToken, 'Accept': 'application/json' }
+                });
+                if (!res.ok) throw new Error('Ошибка');
+                const data = await res.json();
+                if (data.sessions && data.sessions.length > 0) {
+                    container.innerHTML = data.sessions.map(s => {
+                        const date = new Date(s.login_time.replace(' ', 'T') + 'Z');
+                        const isCurrent = s.is_current;
+                        return `<div class="accountRow">
+                            <span class="accountIcon" style="background: #f0f0f0; color: #3b5dd3;">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            </span>
+                            <div class="accountLabel">
+                                <span>${isCurrent ? 'Текущая сессия' : 'Сессия'}</span>
+                                <span class="accountValue">${date.toLocaleDateString('ru-RU')}, ${date.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'})}</span>
+                            </div>
+                            ${isCurrent ? '<span class="accountBadge accountBadge--active">Активна</span>' : ''}
+                        </div>`;
+                    }).join('');
+                } else {
+                    container.innerHTML = '<p style="color:#8b8fa3; text-align:center; padding:10px;">Нет данных о сессиях</p>';
+                }
+            } catch(e) {
+                container.innerHTML = '<p style="color:#b91c1c; text-align:center; padding:10px;">Ошибка загрузки</p>';
+            }
+        }
 
         kop.on('.settingsList a', 'click',
             function(e) {
@@ -655,6 +686,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (act === 'account-info') {
                     kop.show('.account-info');
                     kop.hide('.settingsList');
+                    loadSessions(); // загружаем сессии при открытии
                 } else if (act === 'edit') {
                     kop.show('.editSection');
                     kop.hide('.settingsList');
@@ -697,28 +729,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 kop.flash('Ошибка сохранения', 'error');
             }
         });
-    </script>
-    <script src="/kopilot/js/kopilot.js"></script>
-    <script>
-    // Мгновенный предпросмотр аватара
-    document.getElementById('avatar-upload').addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = function(event) {
-                const avatarContainer = document.querySelector('.accountAvatar');
-                // Очищаем контейнер
-                avatarContainer.innerHTML = '';
-                const img = document.createElement('img');
-                img.src = event.target.result;
-                img.style.width = '100%';
-                img.style.height = '100%';
-                img.style.objectFit = 'cover';
-                avatarContainer.appendChild(img);
-            };
-            reader.readAsDataURL(file);
+
+        // Предпросмотр аватара
+        document.getElementById('avatar-upload').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const avatarContainer = document.querySelector('.accountAvatar');
+                    avatarContainer.innerHTML = '';
+                    const img = document.createElement('img');
+                    img.src = event.target.result;
+                    img.style.width = '100%';
+                    img.style.height = '100%';
+                    img.style.objectFit = 'cover';
+                    avatarContainer.appendChild(img);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // При первой загрузке, если открыт раздел account-info, загружаем сессии
+        if (window.location.search.includes('act=account-info')) {
+            setTimeout(loadSessions, 100);
         }
-    });
     </script>
 </body>
 </html>
