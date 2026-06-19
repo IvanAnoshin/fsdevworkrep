@@ -1,7 +1,7 @@
 <?php
 /**
  * DFSN – Digital Fortress Social Network
- * Ядро алгоритма v5.2.4 (исправлено сохранение поручительств)
+ * Ядро алгоритма v5.2.5 (исправлены запросы к таблицам без столбца `id`)
  * 
  * - Прямая вставка без транзакции для гарантированного сохранения
  * - Все проверки (лимиты, активность) выполняются до вставки
@@ -235,7 +235,10 @@ class DFSN {
     public function calculateUserWeights(int $userId): array {
         $this->guardValidUser($userId);
         $user = find('users', $userId);
-        $row = find('dfsn_weights', $userId);
+        // Исправлено: прямой запрос вместо find('dfsn_weights', ...)
+        $stmt = db()->prepare("SELECT * FROM dfsn_weights WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch();
 
         $endorsementSum = $row ? (float)$row['endorsement_sum'] : 0.0;
         $complaintPenalty = $this->calculateFreshComplaintPenalty($userId);
@@ -288,17 +291,21 @@ class DFSN {
 
     public function getUserWeights(int $userId): array {
         $this->guardValidUser($userId);
-        $row = find('dfsn_weights', $userId);
-        if ($row) {
+        // Исправлено: прямой запрос вместо find('dfsn_weights', ...)
+        $stmt = db()->prepare("SELECT * FROM dfsn_weights WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $data = $stmt->fetch();
+        if ($data) {
             return [
-                'w_trust'    => (float)$row['w_trust'],
-                'w_activity' => (float)$row['w_activity'],
-                'w_expert'   => (float)$row['w_expert']
+                'w_trust'    => (float)$data['w_trust'],
+                'w_activity' => (float)$data['w_activity'],
+                'w_expert'   => (float)$data['w_expert']
             ];
         }
+        // Создаём запись с начальными весами, если её нет
         $default = ['w_trust' => W_BASE, 'w_activity' => W_BASE, 'w_expert' => W_BASE];
         db()->prepare("INSERT IGNORE INTO dfsn_weights (user_id, w_trust, w_activity, w_expert, endorsement_sum, complaint_penalty, updated_at)
-                       VALUES (?, ?, ?, ?, 0, 0, ?)")
+                    VALUES (?, ?, ?, ?, 0, 0, ?)")
             ->execute([$userId, W_BASE, W_BASE, W_BASE, time()]);
         return $default;
     }
@@ -314,7 +321,7 @@ class DFSN {
         return round(sigmoid($avgReadTime / 60 - 0.5), 2);
     }
 
-    // ==================== ПОРУЧИТЕЛЬСТВА (ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ) ====================
+    // ==================== ПОРУЧИТЕЛЬСТВА ====================
 
     public function processEndorsement(int $fromUserId, int $toUserId): string {
         $this->guardValidUser($fromUserId);
@@ -376,7 +383,7 @@ class DFSN {
         return 'success';
     }
 
-    // ==================== ЖАЛОБЫ (АТОМАРНЫЕ) ====================
+    // ==================== ЖАЛОБЫ ====================
 
     public function processComplaint(int $fromUserId, int $toUserId): string {
         $this->guardValidUser($fromUserId);
@@ -444,7 +451,10 @@ class DFSN {
 
     public function getBehavioralProfile(int $userId): array {
         $this->guardValidUser($userId);
-        $row = find('dfsn_behavior_profiles', $userId);
+        // Исправлено: прямой запрос вместо find('dfsn_behavior_profiles', ...)
+        $stmt = db()->prepare("SELECT * FROM dfsn_behavior_profiles WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch();
         if ($row) return json_decode($row['profile_data'], true);
         $default = ['features' => array_fill(0, 18, 0.0), 'count' => 0];
         db()->prepare("INSERT IGNORE INTO dfsn_behavior_profiles (user_id, profile_data, sample_count, updated_at) VALUES (?, ?, 0, ?)")
@@ -523,10 +533,16 @@ class DFSN {
 
     public function getInterestVector(int $userId): array {
         $this->guardValidUser($userId);
-        $row = find('dfsn_interest_vectors', $userId);
+        // Исправлено: прямой запрос вместо find('dfsn_interest_vectors', ...)
+        $stmt = db()->prepare("SELECT * FROM dfsn_interest_vectors WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch();
         if ($row) return json_decode($row['vector'], true);
         $this->updateInterestVector($userId);
-        $row = find('dfsn_interest_vectors', $userId);
+        // повторно получаем после создания
+        $stmt = db()->prepare("SELECT * FROM dfsn_interest_vectors WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch();
         return $row ? json_decode($row['vector'], true) : array_fill(0, VECTOR_DIMENSION, 0.0);
     }
 
@@ -743,7 +759,7 @@ class DFSN {
         if (!DFSN_MODEL_DUMP_ENABLED) return;
 
         $dump = [
-            'version' => '5.2.4',
+            'version' => '5.2.5',
             'timestamp' => time(),
             'weights' => select("SELECT * FROM dfsn_weights"),
             'behavior_profiles_count' => scalar("SELECT COUNT(*) FROM dfsn_behavior_profiles"),

@@ -33,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 db()->prepare("INSERT INTO user_sessions (user_id, login_time) VALUES (?, ?)")
                     ->execute([$userId, $_SESSION['login_time']]);
 
-                header('Location: /profile.php');
+                header('Location: /preloader.php');
                 exit;
             } else {
                 $errors['secret_answer'] = 'Неверный секретный ответ';

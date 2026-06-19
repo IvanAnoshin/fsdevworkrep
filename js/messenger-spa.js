@@ -204,8 +204,18 @@
     function renderPendingAttachments() {
         const container = state.pendingFilesContainer;
         if (!container) return;
+        
+        // Скрываем контейнер, если нет вложений
+        if (state.pendingFiles.length === 0) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+            return;
+        }
+        
+        // Показываем контейнер, если есть вложения
+        container.style.display = 'flex';
         container.innerHTML = '';
-        if (state.pendingFiles.length === 0) return;
+        
         state.pendingFiles.forEach((item, idx) => {
             const div = document.createElement('div');
             div.className = 'attachment-item';
@@ -521,20 +531,31 @@
         }
     }
 
-    function renderChatItem(item, isActive) {
-        let avatarHtml = '';
-        if (item.type === 'collection') avatarHtml = `<div class="chatUnitAvatar chatUnitAvatar--placeholder" style="background:#fef9c3; color:#b45309;">📌</div>`;
-        else if (item.avatar) avatarHtml = `<img class="chatUnitAvatar" src="${esc(item.avatar)}" alt="">`;
-        else avatarHtml = `<div class="chatUnitAvatar chatUnitAvatar--placeholder">${getInitials(item.name)}</div>`;
-        return `
-            <div class="chatUnit ${isActive ? 'active' : ''} ${item.is_pinned ? 'pinned' : ''}" data-type="${item.type}" data-id="${item.id}">
-                ${avatarHtml}
-                <div class="chatUnitContent">
-                    <div class="chatUnitUsername"><p>${esc(item.name)}</p></div>
-                    <div class="chatUnitPreview"><p>${esc(item.last_message || 'Нет сообщений')} <span class="unread-badge" style="display:${item.unread_count > 0 ? 'inline' : 'none'}">(${item.unread_count})</span></p></div>
+function renderChatItem(item, isActive) {
+    let avatarHtml = '';
+    if (item.type === 'collection') avatarHtml = `<div class="chatUnitAvatar chatUnitAvatar--placeholder" style="background:#fef9c3; color:#b45309;">📌</div>`;
+    else if (item.avatar) avatarHtml = `<img class="chatUnitAvatar" src="${esc(item.avatar)}" alt="">`;
+    else avatarHtml = `<div class="chatUnitAvatar chatUnitAvatar--placeholder">${getInitials(item.name)}</div>`;
+
+    // Считаем количество цифр для адаптивного размера бейджа
+    const countText = item.unread_count > 99 ? '99+' : String(item.unread_count || 0);
+    const digits = countText.length;
+    const badgeVisibleClass = item.unread_count > 0 ? 'visible' : '';
+
+    return `
+        <div class="chatUnit ${isActive ? 'active' : ''} ${item.is_pinned ? 'pinned' : ''}" data-type="${item.type}" data-id="${item.id}">
+            ${avatarHtml}
+            <div class="chatUnitContent">
+                <div class="chatUnitUsername"><p>${esc(item.name)}</p></div>
+                <div class="chatUnitPreview">
+                    <p>${esc(item.last_message || 'Нет сообщений')}</p>
+                    <span class="chat-unread-badge ${badgeVisibleClass}" 
+                          data-digits="${digits}" 
+                          data-count="${item.unread_count || 0}">${countText}</span>
                 </div>
-            </div>`;
-    }
+            </div>
+        </div>`;
+}
 
     function updateChatListDOM(newItems) {
         if (!chatListContainer) return;
@@ -550,29 +571,81 @@
         }).join('');
     }
 
-    function updateChatPreview(id, type, last_message, unread_count) {
-        const node = document.querySelector(`.chatUnit[data-type="${type}"][data-id="${id}"]`);
-        if (!node) return;
-        const previewP = node.querySelector('.chatUnitPreview p');
-        if (previewP) {
-            const badge = previewP.querySelector('.unread-badge');
-            previewP.innerHTML = badge
-                ? `${esc(last_message || 'Нет сообщений')} <span class="unread-badge" style="display:${unread_count > 0 ? 'inline' : 'none'}">(${unread_count})</span>`
-                : esc(last_message || 'Нет сообщений');
-        }
+function updateChatPreview(id, type, last_message, unread_count) {
+    const node = document.querySelector(`.chatUnit[data-type="${type}"][data-id="${id}"]`);
+    if (!node) return;
+
+    // Обновляем текст превью
+    const previewP = node.querySelector('.chatUnitPreview p');
+    if (previewP) previewP.textContent = last_message || 'Нет сообщений';
+
+    // Обновляем бейдж
+    let badge = node.querySelector('.chat-unread-badge');
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'chat-unread-badge';
+        node.querySelector('.chatUnitPreview').appendChild(badge);
     }
 
-    function updateUnreadBadge(id, type, increment = false, reset = false) {
-        const node = document.querySelector(`.chatUnit[data-type="${type}"][data-id="${id}"]`);
-        if (!node) return;
-        const badge = node.querySelector('.unread-badge');
-        if (!badge) return;
-        if (reset) { badge.style.display = 'none'; badge.textContent = ''; return; }
-        let count = parseInt(badge.textContent.replace(/[()]/g, '')) || 0;
-        if (increment) count++;
-        badge.textContent = count > 0 ? `(${count})` : '';
-        badge.style.display = count > 0 ? 'inline' : 'none';
+    const count = Math.max(0, parseInt(unread_count) || 0);
+    const countText = count > 99 ? '99+' : String(count);
+    const digits = countText.length;
+
+    badge.textContent = countText;
+    badge.setAttribute('data-digits', digits);
+    badge.setAttribute('data-count', count);
+
+    if (count > 0) {
+        if (!badge.classList.contains('visible')) {
+            badge.classList.add('visible');
+            // Запускаем пульсацию при появлении
+            badge.classList.remove('pulse');
+            void badge.offsetWidth;
+            badge.classList.add('pulse');
+        }
+    } else {
+        badge.classList.remove('visible', 'pulse');
     }
+}
+
+function updateUnreadBadge(id, type, increment = false, reset = false) {
+    const node = document.querySelector(`.chatUnit[data-type="${type}"][data-id="${id}"]`);
+    if (!node) return;
+
+    let badge = node.querySelector('.chat-unread-badge');
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'chat-unread-badge';
+        node.querySelector('.chatUnitPreview').appendChild(badge);
+    }
+
+    if (reset) {
+        badge.classList.remove('visible', 'pulse');
+        badge.textContent = '0';
+        badge.setAttribute('data-count', '0');
+        return;
+    }
+
+    let count = parseInt(badge.getAttribute('data-count')) || 0;
+    if (increment) count++;
+    const countText = count > 99 ? '99+' : String(count);
+    const digits = countText.length;
+
+    badge.textContent = countText;
+    badge.setAttribute('data-digits', digits);
+    badge.setAttribute('data-count', count);
+
+    if (count > 0) {
+        if (!badge.classList.contains('visible')) {
+            badge.classList.add('visible');
+            badge.classList.remove('pulse');
+            void badge.offsetWidth;
+            badge.classList.add('pulse');
+        }
+    } else {
+        badge.classList.remove('visible', 'pulse');
+    }
+}
 
     // ---------- ПОЛЛИНГ ----------
     let pollingIntervals = {};
@@ -614,14 +687,20 @@
                         container.scrollTop = container.scrollHeight;
                         const lastMsg = data.messages[data.messages.length - 1];
                         if (lastMsg) {
-                            updateChatPreview(chatId, 'private', lastMsg.content || (lastMsg.post_preview ? '📎 Пост' : ''), 0);
+                            // ОДНО объявление listItem — используем повторно
                             const listItem = state.allItems.find(i => i.id == chatId && i.type === 'private');
+                            const currentUnread = listItem ? (listItem.unread_count || 0) : 0;
+                            updateChatPreview(chatId, 'private', lastMsg.content || (lastMsg.post_preview ? '📎 Пост' : ''), currentUnread);
                             if (listItem) {
                                 listItem.last_message = lastMsg.content || (lastMsg.file_url ? '📎 Файл' : '');
                                 listItem.last_message_at = lastMsg.created_at;
                                 moveChatToTop(listItem);
                             }
                             if (document.hidden || state.activeChatId != chatId) updateUnreadBadge(chatId, 'private', true);
+                            // Обновляем бейдж в шапке при получении нового сообщения
+                            if (typeof window.updateHeaderUnread === 'function') {
+                                window.updateHeaderUnread({ forceReload: true });
+                            }
                         }
                     }
                 }
@@ -664,14 +743,20 @@
                         container.scrollTop = container.scrollHeight;
                         const lastMsg = data.messages[data.messages.length - 1];
                         if (lastMsg) {
-                            updateChatPreview(groupId, 'group', lastMsg.content || (lastMsg.post_preview ? '📎 Пост' : ''), 0);
+                            // ОДНО объявление listItem — используем повторно
                             const listItem = state.allItems.find(i => i.id == groupId && i.type === 'group');
+                            const currentUnread = listItem ? (listItem.unread_count || 0) : 0;
+                            updateChatPreview(groupId, 'group', lastMsg.content || (lastMsg.post_preview ? '📎 Пост' : ''), currentUnread);
                             if (listItem) {
                                 listItem.last_message = lastMsg.content || (lastMsg.file_url ? '📎 Файл' : '');
                                 listItem.last_message_at = lastMsg.created_at;
                                 moveChatToTop(listItem);
                             }
                             if (document.hidden || state.activeGroupId != groupId) updateUnreadBadge(groupId, 'group', true);
+                            // Обновляем бейдж в шапке при получении нового сообщения
+                            if (typeof window.updateHeaderUnread === 'function') {
+                                window.updateHeaderUnread({ forceReload: true });
+                            }
                         }
                     }
                 }
@@ -2016,14 +2101,16 @@ async function showChatOptionsMenu(e, id, type, name, otherUserId, isPinned) {
         else showChatList();
     }
 
-    function handleBackButton() {
-        saveCurrentChatScrollPosition();
-        if (state.currentView === 'mediahub' || state.currentView === 'members' || state.currentView === 'post') {
-            switchToMessages();
-        } else {
-            navigateTo('list');
-        }
+function handleBackButton() {
+    saveCurrentChatScrollPosition();
+    if (state.currentView === 'mediahub' || state.currentView === 'members' || state.currentView === 'post') {
+        switchToMessages();
+    } else {
+        navigateTo('list');
     }
+    // Мобильная адаптивность
+document.querySelector('.messengerMainArea')?.classList.remove('chat-open');
+}
 
     function handlePopState() {
         const url = new URL(window.location);
@@ -2069,220 +2156,251 @@ async function showChatOptionsMenu(e, id, type, name, otherUserId, isPinned) {
         else if (type === 'collection') { openCollectionChat(id, push); }
     }
 
-    function showChatList() {
-        saveCurrentChatScrollPosition();
-        state.activeChatId = null;
-        state.activeChatType = null;
-        state.activeGroupId = null;
-        state.currentView = 'messages';
-        stopPolling();
-        chatViewPanel.innerHTML = '<div class="chat-placeholder"><p>Выберите чат слева</p></div>';
+function showChatList() {
+    saveCurrentChatScrollPosition();
+    state.activeChatId = null;
+    state.activeChatType = null;
+    state.activeGroupId = null;
+    state.currentView = 'messages';
+    stopPolling();
+    chatViewPanel.innerHTML = '<div class="chat-placeholder"><p>Выберите чат слева</p></div>';
+    // Мобильная адаптивность: показываем список чатов
+    document.querySelector('.messengerMainArea')?.classList.remove('chat-open');
+    // Мобильная адаптивность
+document.querySelector('.messengerMainArea')?.classList.remove('chat-open');
+}
+
+async function openPrivateChat(chatId, push = true) {
+    saveCurrentChatScrollPosition();
+    const chat = state.chats.find(c => c.chat_id == chatId);
+    if (!chat) return;
+    const isCollectionChat = (chat.user1_id == state.userId && chat.user2_id == state.userId);
+    const chatType = isCollectionChat ? 'collection' : 'private';
+    if (state.activeChatId === chatId && state.activeChatType === chatType) return;
+
+    state.activeChatId = chatId;
+    state.activeChatType = chatType;
+    state.activeGroupId = null;
+    state.currentView = 'messages';
+    stopPolling();
+    state.mediaItems = [];
+    state.mediaPage = 1;
+    state.mediaHasMore = true;
+
+    if (push) history.pushState(null, '', `?chat_id=${chatId}`);
+    state.activeChatReceiverId = isCollectionChat ? state.userId : chat.other_user_id;
+
+    // Мобильная адаптивность: показываем переписку, скрываем список
+    document.querySelector('.messengerMainArea')?.classList.add('chat-open');
+
+    let avatarHtml, headerContent, profileLinkId, chatName;
+    if (isCollectionChat) {
+        avatarHtml = `<div class="chatHeaderAvatar" style="background:#fef9c3; color:#b45309; display:flex; align-items:center; justify-content:center; font-weight:600; width:40px; height:40px; border-radius:50%;">📌</div>`;
+        headerContent = `<span class="chatHeaderUsername" style="flex:1; font-weight:600;">Коллекция</span>`;
+        profileLinkId = null;
+        chatName = 'Коллекция';
+    } else {
+        profileLinkId = chat.other_user_id;
+        if (profileLinkId == state.userId) profileLinkId = chat.user1_id == state.userId ? chat.user2_id : chat.user1_id;
+        const isSelf = profileLinkId == state.userId;
+        const profileUrl = isSelf ? '/profile.php' : `/user.php?id=${profileLinkId}`;
+        avatarHtml = (chat.avatar && chat.avatar.trim())
+            ? `<img class="chatHeaderAvatar" src="${esc(chat.avatar)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">`
+            : `<div class="chatHeaderAvatar" style="width:40px;height:40px;border-radius:50%;background:#e0e7ff;color:#3b5dd3;display:flex;align-items:center;justify-content:center;font-weight:600;">${getInitials(chat.first_name+' '+chat.last_name)}</div>`;
+        headerContent = `<a href="${profileUrl}" class="chatHeaderUsername" style="text-decoration:none; color:inherit;">${esc(chat.first_name)} ${esc(chat.last_name)}</a>`;
+        chatName = `${chat.first_name} ${chat.last_name}`;
     }
 
-    async function openPrivateChat(chatId, push = true) {
-        saveCurrentChatScrollPosition();
-        const chat = state.chats.find(c => c.chat_id == chatId);
-        if (!chat) return;
-        const isCollectionChat = (chat.user1_id == state.userId && chat.user2_id == state.userId);
-        const chatType = isCollectionChat ? 'collection' : 'private';
-        if (state.activeChatId === chatId && state.activeChatType === chatType) return;
-
-        state.activeChatId = chatId;
-        state.activeChatType = chatType;
-        state.activeGroupId = null;
-        state.currentView = 'messages';
-        stopPolling();
-        state.mediaItems = [];
-        state.mediaPage = 1;
-        state.mediaHasMore = true;
-
-        if (push) history.pushState(null, '', `?chat_id=${chatId}`);
-        state.activeChatReceiverId = isCollectionChat ? state.userId : chat.other_user_id;
-
-        let avatarHtml, headerContent, profileLinkId, chatName;
-        if (isCollectionChat) {
-            avatarHtml = `<div class="chatHeaderAvatar" style="background:#fef9c3; color:#b45309; display:flex; align-items:center; justify-content:center; font-weight:600; width:40px; height:40px; border-radius:50%;">📌</div>`;
-            headerContent = `<span class="chatHeaderUsername" style="flex:1; font-weight:600;">Коллекция</span>`;
-            profileLinkId = null;
-            chatName = 'Коллекция';
-        } else {
-            profileLinkId = chat.other_user_id;
-            if (profileLinkId == state.userId) profileLinkId = chat.user1_id == state.userId ? chat.user2_id : chat.user1_id;
-            const isSelf = profileLinkId == state.userId;
-            const profileUrl = isSelf ? '/profile.php' : `/user.php?id=${profileLinkId}`;
-            avatarHtml = (chat.avatar && chat.avatar.trim())
-                ? `<img class="chatHeaderAvatar" src="${esc(chat.avatar)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">`
-                : `<div class="chatHeaderAvatar" style="width:40px;height:40px;border-radius:50%;background:#e0e7ff;color:#3b5dd3;display:flex;align-items:center;justify-content:center;font-weight:600;">${getInitials(chat.first_name+' '+chat.last_name)}</div>`;
-            headerContent = `<a href="${profileUrl}" class="chatHeaderUsername" style="text-decoration:none; color:inherit;">${esc(chat.first_name)} ${esc(chat.last_name)}</a>`;
-            chatName = `${chat.first_name} ${chat.last_name}`;
-        }
-
-        chatViewPanel.innerHTML = `
-            <div class="chatModule">
-                <div class="chatHeader">
-                    <button class="chatHeaderQuit">Назад</button>
-                    ${avatarHtml}
-                    ${headerContent}
-                    <button class="chatHeaderOptions" id="chat-options-btn" title="Действия"><div class="multiDot"></div><div class="multiDot"></div><div class="multiDot"></div></button>
-                </div>
-                <div class="chat-messages-panel">
-                    <div class="chatBody" id="messages-container"></div>
-                    <div class="chatTyping">
-                        <input type="file" id="attach-file-input" style="display:none" accept="image/*,video/mp4,application/pdf">
-                        <button class="chatTypingPin" id="attach-file-btn" title="Прикрепить файл"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-                        <textarea id="typing-input" class="chatTypingInput" placeholder="Сообщение..."></textarea>
-                        <button class="sendMessageButton" id="send-msg-btn" title="Отправить"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
-                        <button class="sendMessageButton" id="cancel-edit-btn" style="display:none" title="Отмена">✕</button>
-                    </div>
-                </div>
-                <div class="mediahub-panel" style="display: none;">
-                    <div class="media-tabs">
-                        <button class="media-tab" data-type="photo">Фото</button>
-                        <button class="media-tab" data-type="video">Видео</button>
-                        <button class="media-tab" data-type="file">Файлы</button>
-                    </div>
-                    <div class="media-grid-container"></div>
-                </div>
-                <div class="members-panel" style="display: none;">
-                    <div class="members-header">Участники группы</div>
-                    <div class="members-list-container"></div>
-                </div>
-                <div class="post-view-panel" style="display: none; flex-direction: column; overflow-y: auto; background: #fff;">
-                    <div id="post-detail-container" style="padding: 20px;"></div>
-                    <div id="post-comments-container" style="padding: 20px; border-top: 1px solid #f0f2f5;"></div>
+    chatViewPanel.innerHTML = `
+        <div class="chatModule">
+            <div class="chatHeader">
+                <button class="chatHeaderQuit">Назад</button>
+                ${avatarHtml}
+                ${headerContent}
+                <button class="chatHeaderOptions" id="chat-options-btn" title="Действия"><div class="multiDot"></div><div class="multiDot"></div><div class="multiDot"></div></button>
+            </div>
+            <div class="chat-messages-panel">
+                <div class="chatBody" id="messages-container"></div>
+                <div class="chatTyping">
+                    <input type="file" id="attach-file-input" style="display:none" accept="image/*,video/mp4,application/pdf">
+                    <button class="chatTypingPin" id="attach-file-btn" title="Прикрепить файл"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+                    <textarea id="typing-input" class="chatTypingInput" placeholder="Сообщение..."></textarea>
+                    <button class="sendMessageButton" id="send-msg-btn" title="Отправить"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
+                    <button class="sendMessageButton" id="cancel-edit-btn" style="display:none" title="Отмена">✕</button>
                 </div>
             </div>
-        `;
+            <div class="mediahub-panel" style="display: none;">
+                <div class="media-tabs">
+                    <button class="media-tab" data-type="photo">Фото</button>
+                    <button class="media-tab" data-type="video">Видео</button>
+                    <button class="media-tab" data-type="file">Файлы</button>
+                </div>
+                <div class="media-grid-container"></div>
+            </div>
+            <div class="members-panel" style="display: none;">
+                <div class="members-header">Участники группы</div>
+                <div class="members-list-container"></div>
+            </div>
+            <div class="post-view-panel" style="display: none; flex-direction: column; overflow-y: auto; background: #fff;">
+                <div id="post-detail-container" style="padding: 20px;"></div>
+                <div id="post-comments-container" style="padding: 20px; border-top: 1px solid #f0f2f5;"></div>
+            </div>
+        </div>
+    `;
 
-        initPrivateChatEvents(chatId);
-        attachChatOptionsMenu(chatId, chatType, chatName, profileLinkId);
-        await loadPrivateMessages(chatId);
-        if (!isCollectionChat) startPollingForPrivate(chatId);
+    initPrivateChatEvents(chatId);
+    attachChatOptionsMenu(chatId, chatType, chatName, profileLinkId);
+    await loadPrivateMessages(chatId);
+    if (!isCollectionChat) startPollingForPrivate(chatId);
 
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('view') === 'media') await switchToMediaHub();
-        else if (urlParams.get('view') === 'members') await switchToMembers();
+    if (typeof window.updateHeaderUnread === 'function') {
+        window.updateHeaderUnread({ forceReload: true });
     }
 
-    async function openGroupChat(groupId, push = true) {
-        saveCurrentChatScrollPosition();
-        if (state.activeGroupId === groupId && state.activeChatType === 'group') return;
-        state.activeGroupId = groupId;
-        state.activeChatType = 'group';
-        state.activeChatId = null;
-        state.currentView = 'messages';
-        stopPolling();
-        const group = state.groups.find(g => g.id == groupId);
-        if (!group) return;
-        if (push) history.pushState(null, '', `?group_id=${groupId}`);
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('view') === 'media') await switchToMediaHub();
+    else if (urlParams.get('view') === 'members') await switchToMembers();
+    // Мобильная адаптивность
+document.querySelector('.messengerMainArea')?.classList.add('chat-open');
+}
 
-        chatViewPanel.innerHTML = `
-            <div class="chatModule">
-                <div class="chatHeader">
-                    <button class="chatHeaderQuit">Назад</button>
-                    <div class="chatHeaderAvatar" style="background:#e8e0fc; color:#7c3aed; display:flex; align-items:center; justify-content:center; font-weight:600; width:40px; height:40px; border-radius:50%;">${group.name.charAt(0).toUpperCase()}</div>
-                    <button class="chatHeaderGroupName" id="group-name-btn" style="background:none; border:none; font-weight:600; font-size:1.05rem; cursor:pointer; color:inherit;">${esc(group.name)}</button>
-                    <button class="chatHeaderOptions" id="chat-options-btn" title="Действия"><div class="multiDot"></div><div class="multiDot"></div><div class="multiDot"></div></button>
-                </div>
-                <div class="chat-messages-panel">
-                    <div class="chatBody" id="messages-container"></div>
-                    <div class="chatTyping">
-                        <input type="file" id="attach-file-input" style="display:none" accept="image/*,video/mp4,application/pdf">
-                        <button class="chatTypingPin" id="attach-file-btn" title="Прикрепить файл"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-                        <textarea id="typing-input" class="chatTypingInput" placeholder="Сообщение в группу..."></textarea>
-                        <button class="sendMessageButton" id="send-msg-btn" title="Отправить"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
-                        <button class="sendMessageButton" id="cancel-edit-btn" style="display:none" title="Отмена">✕</button>
-                    </div>
-                </div>
-                <div class="mediahub-panel" style="display: none;">
-                    <div class="media-tabs">
-                        <button class="media-tab" data-type="photo">Фото</button>
-                        <button class="media-tab" data-type="video">Видео</button>
-                        <button class="media-tab" data-type="file">Файлы</button>
-                    </div>
-                    <div class="media-grid-container"></div>
-                </div>
-                <div class="members-panel" style="display: none;">
-                    <div class="members-header">Участники группы</div>
-                    <div class="members-list-container"></div>
-                </div>
-                <div class="post-view-panel" style="display: none; flex-direction: column; overflow-y: auto; background: #fff;">
-                    <div id="post-detail-container" style="padding: 20px;"></div>
-                    <div id="post-comments-container" style="padding: 20px; border-top: 1px solid #f0f2f5;"></div>
+async function openGroupChat(groupId, push = true) {
+    saveCurrentChatScrollPosition();
+    if (state.activeGroupId === groupId && state.activeChatType === 'group') return;
+    state.activeGroupId = groupId;
+    state.activeChatType = 'group';
+    state.activeChatId = null;
+    state.currentView = 'messages';
+    stopPolling();
+    const group = state.groups.find(g => g.id == groupId);
+    if (!group) return;
+    if (push) history.pushState(null, '', `?group_id=${groupId}`);
+
+    // Мобильная адаптивность: показываем переписку, скрываем список
+    document.querySelector('.messengerMainArea')?.classList.add('chat-open');
+
+    chatViewPanel.innerHTML = `
+        <div class="chatModule">
+            <div class="chatHeader">
+                <button class="chatHeaderQuit">Назад</button>
+                <div class="chatHeaderAvatar" style="background:#e8e0fc; color:#7c3aed; display:flex; align-items:center; justify-content:center; font-weight:600; width:40px; height:40px; border-radius:50%;">${group.name.charAt(0).toUpperCase()}</div>
+                <button class="chatHeaderGroupName" id="group-name-btn" style="background:none; border:none; font-weight:600; font-size:1.05rem; cursor:pointer; color:inherit;">${esc(group.name)}</button>
+                <button class="chatHeaderOptions" id="chat-options-btn" title="Действия"><div class="multiDot"></div><div class="multiDot"></div><div class="multiDot"></div></button>
+            </div>
+            <div class="chat-messages-panel">
+                <div class="chatBody" id="messages-container"></div>
+                <div class="chatTyping">
+                    <input type="file" id="attach-file-input" style="display:none" accept="image/*,video/mp4,application/pdf">
+                    <button class="chatTypingPin" id="attach-file-btn" title="Прикрепить файл"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+                    <textarea id="typing-input" class="chatTypingInput" placeholder="Сообщение в группу..."></textarea>
+                    <button class="sendMessageButton" id="send-msg-btn" title="Отправить"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
+                    <button class="sendMessageButton" id="cancel-edit-btn" style="display:none" title="Отмена">✕</button>
                 </div>
             </div>
-        `;
-        initGroupChatEvents(groupId);
-        attachChatOptionsMenu(groupId, 'group', group.name, null);
-        initMediaTabs();
-        await loadGroupMessages(groupId);
-        startPollingForGroup(groupId);
-        const groupNameBtn = document.getElementById('group-name-btn');
-        if (groupNameBtn) groupNameBtn.addEventListener('click', () => switchToMembers());
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('view') === 'media') await switchToMediaHub();
-        else if (urlParams.get('view') === 'members') await switchToMembers();
-        else if (urlParams.get('view') === 'post') {
-            const postId = urlParams.get('post_id');
-            if (postId) await switchToPostView(parseInt(postId));
-        }
+            <div class="mediahub-panel" style="display: none;">
+                <div class="media-tabs">
+                    <button class="media-tab" data-type="photo">Фото</button>
+                    <button class="media-tab" data-type="video">Видео</button>
+                    <button class="media-tab" data-type="file">Файлы</button>
+                </div>
+                <div class="media-grid-container"></div>
+            </div>
+            <div class="members-panel" style="display: none;">
+                <div class="members-header">Участники группы</div>
+                <div class="members-list-container"></div>
+            </div>
+            <div class="post-view-panel" style="display: none; flex-direction: column; overflow-y: auto; background: #fff;">
+                <div id="post-detail-container" style="padding: 20px;"></div>
+                <div id="post-comments-container" style="padding: 20px; border-top: 1px solid #f0f2f5;"></div>
+            </div>
+        </div>
+    `;
+    initGroupChatEvents(groupId);
+    attachChatOptionsMenu(groupId, 'group', group.name, null);
+    initMediaTabs();
+    await loadGroupMessages(groupId);
+    startPollingForGroup(groupId);
+
+    if (typeof window.updateHeaderUnread === 'function') {
+        window.updateHeaderUnread({ forceReload: true });
     }
 
-    async function openCollectionChat(chatId, push = true) {
-        saveCurrentChatScrollPosition();
-        if (state.activeChatId === chatId && state.activeChatType === 'collection') return;
-        state.activeChatId = chatId;
-        state.activeChatType = 'collection';
-        state.activeGroupId = null;
-        state.currentView = 'messages';
-        stopPolling();
-        const collectionItem = state.allItems.find(i => i.type === 'collection' && i.id == chatId);
-        if (!collectionItem) return;
-        if (push) history.pushState(null, '', `?chat_id=${chatId}`);
-        state.activeChatReceiverId = state.userId;
+    const groupNameBtn = document.getElementById('group-name-btn');
+    if (groupNameBtn) groupNameBtn.addEventListener('click', () => switchToMembers());
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('view') === 'media') await switchToMediaHub();
+    else if (urlParams.get('view') === 'members') await switchToMembers();
+    else if (urlParams.get('view') === 'post') {
+        const postId = urlParams.get('post_id');
+        if (postId) await switchToPostView(parseInt(postId));
+    }
+    // Мобильная адаптивность
+document.querySelector('.messengerMainArea')?.classList.add('chat-open');
+}
 
-        chatViewPanel.innerHTML = `
-            <div class="chatModule">
-                <div class="chatHeader">
-                    <button class="chatHeaderQuit">Назад</button>
-                    <div class="chatHeaderAvatar" style="background:#fef9c3; color:#b45309; display:flex; align-items:center; justify-content:center; font-weight:600; width:40px; height:40px; border-radius:50%;">📌</div>
-                    <span class="chatHeaderUsername" style="flex:1; font-weight:600;">Коллекция</span>
-                    <button class="chatHeaderOptions" id="chat-options-btn" title="Действия"><div class="multiDot"></div><div class="multiDot"></div><div class="multiDot"></div></button>
-                </div>
-                <div class="chat-messages-panel">
-                    <div class="chatBody" id="messages-container"></div>
-                    <div class="chatTyping">
-                        <input type="file" id="attach-file-input" style="display:none" accept="image/*,video/mp4,application/pdf">
-                        <button class="chatTypingPin" id="attach-file-btn" title="Прикрепить файл"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
-                        <textarea id="typing-input" class="chatTypingInput" placeholder="Заметка..."></textarea>
-                        <button class="sendMessageButton" id="send-msg-btn" title="Отправить"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
-                        <button class="sendMessageButton" id="cancel-edit-btn" style="display:none" title="Отмена">✕</button>
-                    </div>
-                </div>
-                <div class="mediahub-panel" style="display: none;">
-                    <div class="media-tabs">
-                        <button class="media-tab" data-type="photo">Фото</button>
-                        <button class="media-tab" data-type="video">Видео</button>
-                        <button class="media-tab" data-type="file">Файлы</button>
-                    </div>
-                    <div class="media-grid-container"></div>
-                </div>
-                <div class="post-view-panel" style="display: none; flex-direction: column; overflow-y: auto; background: #fff;">
-                    <div id="post-detail-container" style="padding: 20px;"></div>
-                    <div id="post-comments-container" style="padding: 20px; border-top: 1px solid #f0f2f5;"></div>
+async function openCollectionChat(chatId, push = true) {
+    saveCurrentChatScrollPosition();
+    if (state.activeChatId === chatId && state.activeChatType === 'collection') return;
+    state.activeChatId = chatId;
+    state.activeChatType = 'collection';
+    state.activeGroupId = null;
+    state.currentView = 'messages';
+    stopPolling();
+    const collectionItem = state.allItems.find(i => i.type === 'collection' && i.id == chatId);
+    if (!collectionItem) return;
+    if (push) history.pushState(null, '', `?chat_id=${chatId}`);
+    state.activeChatReceiverId = state.userId;
+
+    // Мобильная адаптивность: показываем переписку, скрываем список
+    document.querySelector('.messengerMainArea')?.classList.add('chat-open');
+
+    chatViewPanel.innerHTML = `
+        <div class="chatModule">
+            <div class="chatHeader">
+                <button class="chatHeaderQuit">Назад</button>
+                <div class="chatHeaderAvatar" style="background:#fef9c3; color:#b45309; display:flex; align-items:center; justify-content:center; font-weight:600; width:40px; height:40px; border-radius:50%;">📌</div>
+                <span class="chatHeaderUsername" style="flex:1; font-weight:600;">Коллекция</span>
+                <button class="chatHeaderOptions" id="chat-options-btn" title="Действия"><div class="multiDot"></div><div class="multiDot"></div><div class="multiDot"></div></button>
+            </div>
+            <div class="chat-messages-panel">
+                <div class="chatBody" id="messages-container"></div>
+                <div class="chatTyping">
+                    <input type="file" id="attach-file-input" style="display:none" accept="image/*,video/mp4,application/pdf">
+                    <button class="chatTypingPin" id="attach-file-btn" title="Прикрепить файл"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button>
+                    <textarea id="typing-input" class="chatTypingInput" placeholder="Заметка..."></textarea>
+                    <button class="sendMessageButton" id="send-msg-btn" title="Отправить"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
+                    <button class="sendMessageButton" id="cancel-edit-btn" style="display:none" title="Отмена">✕</button>
                 </div>
             </div>
-        `;
+            <div class="mediahub-panel" style="display: none;">
+                <div class="media-tabs">
+                    <button class="media-tab" data-type="photo">Фото</button>
+                    <button class="media-tab" data-type="video">Видео</button>
+                    <button class="media-tab" data-type="file">Файлы</button>
+                </div>
+                <div class="media-grid-container"></div>
+            </div>
+            <div class="post-view-panel" style="display: none; flex-direction: column; overflow-y: auto; background: #fff;">
+                <div id="post-detail-container" style="padding: 20px;"></div>
+                <div id="post-comments-container" style="padding: 20px; border-top: 1px solid #f0f2f5;"></div>
+            </div>
+        </div>
+    `;
 
-        const headerName = chatViewPanel.querySelector('.chatHeaderUsername');
-        if (headerName) headerName.textContent = 'Коллекция';
+    const headerName = chatViewPanel.querySelector('.chatHeaderUsername');
+    if (headerName) headerName.textContent = 'Коллекция';
 
-        initPrivateChatEvents(chatId);
-        attachChatOptionsMenu(chatId, 'collection', 'Коллекция', null);
-        await loadPrivateMessages(chatId);
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('view') === 'media') await switchToMediaHub();
+    initPrivateChatEvents(chatId);
+    attachChatOptionsMenu(chatId, 'collection', 'Коллекция', null);
+    await loadPrivateMessages(chatId);
+
+    if (typeof window.updateHeaderUnread === 'function') {
+        window.updateHeaderUnread({ forceReload: true });
     }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('view') === 'media') await switchToMediaHub();
+}
 
     // ---------- ФОНОВОЕ ОБНОВЛЕНИЕ ПРЕВЬЮ ----------
     function startBackgroundRefresh() {
@@ -2510,6 +2628,70 @@ async function showChatOptionsMenu(e, id, type, name, otherUserId, isPinned) {
         `;
         document.head.appendChild(style);
     }
+
+    // ---------- МОБИЛЬНАЯ АДАПТИВНОСТЬ ----------
+    function handleMobileView() {
+        const messengerArea = document.querySelector('.messengerMainArea');
+        if (!messengerArea) return;
+
+        const isMobile = window.innerWidth <= 767;
+
+        if (!isMobile) {
+            // На десктопе всегда показываем оба блока
+            messengerArea.classList.remove('chat-open');
+            return;
+        }
+
+        // На мобильных: если открыт чат — показываем переписку, иначе список
+        if (state.activeChatId || state.activeGroupId) {
+            messengerArea.classList.add('chat-open');
+        } else {
+            messengerArea.classList.remove('chat-open');
+        }
+    }
+
+    // Вызываем при каждом переходе
+    const originalOpenPrivateChat = openPrivateChat;
+    openPrivateChat = async function(chatId, push = true) {
+        await originalOpenPrivateChat(chatId, push);
+        handleMobileView();
+    };
+
+    const originalOpenGroupChat = openGroupChat;
+    openGroupChat = async function(groupId, push = true) {
+        await originalOpenGroupChat(groupId, push);
+        handleMobileView();
+    };
+
+    const originalOpenCollectionChat = openCollectionChat;
+    openCollectionChat = async function(chatId, push = true) {
+        await originalOpenCollectionChat(chatId, push);
+        handleMobileView();
+    };
+
+    const originalShowChatList = showChatList;
+    showChatList = function() {
+        originalShowChatList();
+        handleMobileView();
+    };
+
+    // Слушаем кнопку "Назад" – она уже вызывает showChatList, но на всякий случай
+    document.addEventListener('click', (e) => {
+        const backBtn = e.target.closest('.chatHeaderQuit');
+        if (backBtn) {
+            // showChatList сама вызовет handleMobileView
+        }
+    });
+
+    // При ресайзе
+    window.addEventListener('resize', handleMobileView);
+
+    // В самом конце инициализации вызываем
+    const originalInit = init;
+    init = async function() {
+        await originalInit();
+        handleMobileView();
+    };
 
     init();
 })();

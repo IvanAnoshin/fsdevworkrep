@@ -1,0 +1,121 @@
+/* ==================== ПОИСК ==================== */
+.searchArea {
+    margin-left: 20%;
+    min-height: 100vh;
+    background-color: #f0f0f0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+.searchContainer {
+    width: 100%;
+    max-width: 600px;
+    margin-top: 35vh;
+    transition: margin-top 0.35s ease;
+}
+
+.searchContainer.active { margin-top: 0; }
+
+.searchInputWrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.searchIcon {
+    position: absolute;
+    left: 16px;
+    color: #8b8fa3;
+    pointer-events: none;
+}
+
+.searchInput {
+    width: 100%;
+    padding: 14px 16px 14px 48px;
+    border: 1px solid #e0e0e0;
+    border-radius: 24px;
+    font-size: 1.2em;
+    font-family: inherit;
+    outline: none;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.searchInput:focus {
+    border-color: #7c3aed;
+    box-shadow: 0 4px 16px rgba(124, 58, 237, 0.15);
+}
+
+.searchResults {
+    margin-top: 16px;
+    background: #fff;
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    width: fit-content;
+    min-width: 340px;
+    max-width: 90%;
+    margin-left: auto;
+    margin-right: auto;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.searchResults.visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.searchResultItem {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid #f2f3f7;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.searchResultItem:last-child { border-bottom: none; }
+
+.searchResultItem:hover {
+    background: #f8f9ff;
+    border-radius: 8px;
+    padding-left: 8px;
+    padding-right: 8px;
+    margin: 0 -8px;
+}
+
+.searchResultAvatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.searchResultAvatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.searchResultInitials {
+    font-weight: 600;
+    font-size: 0.9em;
+    text-transform: uppercase;
+}
+
+.searchResultName {
+    font-size: 1.2em;
+    font-weight: 500;
+    color: #1e1e2f;
+}

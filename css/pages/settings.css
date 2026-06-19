@@ -1,0 +1,399 @@
+/* ==================== НАСТРОЙКИ ==================== */
+.settingsMainArea {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background-color: #f0f0f0;
+    margin-left: 20%;
+    gap: 5px;
+    font-size: 1.2em;
+}
+
+.accountHeader {
+    display: flex;
+    gap: 20px;
+    margin-top: 20px;
+    line-height: 100px;
+    background-color: white;
+    padding: 20px;
+    border-radius: 20px;
+    width: fit-content;
+}
+
+.accountHeader img {
+    width: 100px;
+    border-radius: 100px;
+}
+
+.settingsList {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 400px;
+    background-color: #ffffff;
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.settingsList a {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    text-decoration: none;
+    color: #1e1e2f;
+    padding: 16px 24px;
+    background-color: #fff;
+    font-size: 1em;
+    font-weight: 500;
+    border-bottom: 1px solid #f2f3f7;
+    transition: background-color 0.2s ease;
+}
+
+.settingsList a:last-child { border-bottom: none; }
+.settingsList a:hover { background-color: #f8f9ff; }
+
+/* Секция профиля в настройках */
+.accountProfileRow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    padding: 12px 0;
+    border-bottom: 1px solid #f2f3f7;
+}
+
+.accountAvatar {
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    background: #eef1f8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.accountAvatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.accountAvatarPlaceholder {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #4a4f63;
+    text-transform: uppercase;
+}
+
+.accountProfileFields { flex: 1; display: flex; flex-direction: column; }
+.accountUpload { flex-shrink: 0; }
+
+.saveAccountChanges {
+    background-color: #3b5dd3;
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 1em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+/* Об аккаунте */
+.account-info {
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+.accountCard {
+    background: #fff;
+    border-radius: 20px;
+    padding: 24px 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+    margin-bottom: 20px;
+}
+
+.accountTitle {
+    margin: 0 0 20px;
+    font-size: 1.3rem;
+    font-weight: 600;
+    color: #1e1e2f;
+}
+
+.accountGroup { margin-bottom: 24px; }
+
+.accountGroupHeader {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #8b8fa3;
+    margin: 0 0 12px;
+}
+
+.accountRow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid #f2f3f7;
+    text-decoration: none;
+    color: inherit;
+}
+
+.accountRow:last-child { border-bottom: none; }
+
+.accountRow--action {
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.accountRow--action:hover {
+    background: #f8f9ff;
+    border-radius: 8px;
+    padding-left: 8px;
+    padding-right: 8px;
+    margin: 0 -8px;
+}
+
+.accountLabel {
+    flex: 1;
+    font-size: 1em;
+    font-weight: 500;
+    color: #1e1e2f;
+    display: flex;
+    flex-direction: column;
+}
+
+.accountValue {
+    font-size: 1em;
+    color: #6c757d;
+    font-weight: 400;
+    margin-top: 2px;
+}
+
+.accountArrow {
+    font-size: 1em;
+    color: #c5c9d6;
+    transition: color 0.2s;
+}
+
+.accountRow--action:hover .accountArrow { color: #7c3aed; }
+
+.accountBadge {
+    font-size: 1em;
+    font-weight: 500;
+    padding: 2px 10px;
+    border-radius: 20px;
+    background: #f0fdf6;
+    color: #059669;
+}
+
+.accountBadge--active {
+    background: #ecfdf5;
+    color: #059669;
+}
+
+.accountBtn {
+    background: #f2f2f7;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 1em;
+    font-weight: 500;
+    color: #1e1e2f;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.accountBtn--small { white-space: nowrap; }
+
+.accountBtn--full {
+    width: 100%;
+    text-align: center;
+    margin-top: 8px;
+    padding: 10px;
+    background: #fee2e2;
+    color: #b91c1c;
+    font-weight: 500;
+}
+
+.accountBtn:hover { background: #e4e4ed; }
+.accountBtn--full:hover { background: #fecaca; }
+
+/* Редактирование личных данных */
+.editSection {
+    width: 100%;
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+.editCard {
+    background: #fff;
+    border-radius: 20px;
+    padding: 24px 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+}
+
+.editRow {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+}
+
+.editLabel {
+    font-size: 1em;
+    font-weight: 500;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.editIcon--blue { color: #3b82f6; background: #eff6ff; }
+.editIcon--green { color: #10b981; background: #ecfdf5; }
+.editIcon--orange { color: #f59e0b; background: #fffbeb; }
+.editIcon--purple { color: #8b5cf6; background: #f5f3ff; }
+.editIcon--teal { color: #14b8a6; background: #f0fdfa; }
+.editIcon--pink { color: #ec4899; background: #fdf2f8; }
+.editIcon--indigo { color: #6366f1; background: #eef2ff; }
+.editIcon--coral { color: #f87171; background: #fef2f2; }
+.editIcon--mint { color: #34d399; background: #ecfdf5; }
+.editIcon--lavender { color: #a78bfa; background: #f5f3ff; }
+.editIcon--sky { color: #38bdf8; background: #f0f9ff; }
+
+.editRow input,
+.editRow textarea,
+.editRow select {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+    font-size: 1em;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+    background: #fafafa;
+    box-sizing: border-box;
+}
+
+.editRow textarea {
+    min-height: 50px;
+    max-height: 120px;
+    field-sizing: content;
+    resize: none;
+}
+
+.editRow input:focus,
+.editRow textarea:focus,
+.editRow select:focus { border-color: #7c3aed; background: #fff; }
+
+.saveBtn {
+    background: #3b5dd3;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+    width: 100%;
+    margin-top: 8px;
+}
+
+.escapeButton {
+    padding: 10px;
+    margin-bottom: 10px;
+    border: none;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 0.9em;
+    width: fit-content;
+}
+
+.escapeButton:hover { background-color: lightgray; transition: 0.2s ease; }
+
+/* Приватность */
+.privacySection {
+    display: flex;
+    flex-direction: column;
+    max-width: 440px;
+    background-color: white;
+    padding: 24px 20px;
+    border-radius: 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+    gap: 20px;
+    margin: 0 auto;
+    margin-bottom: 20px;
+}
+
+.privacyRow { display: flex; align-items: center; gap: 12px; }
+
+.privacyGroupHeader {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: #fef2f2;
+    padding: 12px 16px;
+    border-radius: 12px;
+    color: #991b1b;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.privacyLabel { flex: 1; font-size: 1em; font-weight: 500; color: #1e1e2f; }
+
+.privacyLabelWithDesc {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.privacyDesc {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin: 0;
+    line-height: 1.3;
+}
+
+.privacySelect {
+    padding: 8px 12px;
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    background: #fafafa;
+    font-size: 0.9rem;
+    color: #333;
+    outline: none;
+    cursor: pointer;
+    min-width: 140px;
+    transition: border-color 0.2s;
+}
+
+.privacySelect:focus { border-color: #7c3aed; }
+
+.privacyCheckbox {
+    width: 18px;
+    height: 18px;
+    accent-color: #3b5dd3;
+    cursor: pointer;
+}
+
+.privacyLink {
+    font-size: 0.9rem;
+    color: black;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.privacyLink:hover { text-decoration: underline; }

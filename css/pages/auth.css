@@ -1,0 +1,122 @@
+/* ==================== АВТОРИЗАЦИЯ И 2FA ==================== */
+.loginPageArea,
+.registerPageArea {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    background-color: #f0f0f0;
+    width: 100%;
+    height: 100vh;
+}
+
+.welcome {
+    color: #3b5dd3;
+    font-size: 2.5em;
+    font-weight: 600;
+}
+
+.authLoginSection {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.authLoginSection form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.helpLinks a {
+    text-decoration: none;
+    color: black;
+}
+
+.authLoginSection input {
+    border: none;
+    outline: none;
+    border-radius: 20px;
+    padding: 10px;
+}
+
+.authLoginSection button {
+    border-radius: 10px;
+    border: none;
+    padding: 10px;
+    cursor: pointer;
+    background-color: #3b5dd3;
+    color: white;
+    font-size: 1em;
+}
+
+.aboutUs {
+    text-decoration: none;
+    color: black;
+}
+
+.sex {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+}
+
+fieldset {
+    border: none;
+    color: #000000;
+}
+
+input[name="first_name"],
+input[name="last_name"] {
+    text-transform: capitalize;
+}
+
+.error-message {
+    color: red;
+    font-size: 0.9em;
+}
+
+.input-error {
+    border-color: red;
+}
+
+/* 2FA */
+.twoFactorsMainArea {
+    background-color: #f0f0f0;
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.secretAnswerForm {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.twoFactorsMainArea input {
+    width: fit-content;
+    padding: 10px;
+    border: none;
+    outline: none;
+    border-radius: 20px;
+}
+
+.twoFactorsMainArea p {
+    color: black;
+    font-size: 1.2em;
+}
+
+.twoFactorsMainArea button {
+    padding: 10px 20px;
+    border: none;
+    cursor: pointer;
+    border-radius: 10px;
+    background-color: #3b5dd3;
+    color: white;
+}

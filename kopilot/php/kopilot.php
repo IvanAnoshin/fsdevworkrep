@@ -15,6 +15,8 @@ define('DB_USER', 'root');
 define('DB_PASS', '');
 define('DB_CHARSET', 'utf8mb4');
 
+date_default_timezone_set('UTC');
+
 function db(): PDO {
     static $pdo = null;
     if ($pdo === null) {
@@ -26,6 +28,8 @@ function db(): PDO {
         ];
         try {
             $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
+            // Заставляем MySQL работать в UTC
+            $pdo->exec("SET time_zone = '+00:00'");
         } catch (PDOException $e) {
             error_log('DB Connection failed: ' . $e->getMessage());
             http_response_code(500);
@@ -100,6 +104,21 @@ function require_auth(): void {
     if (!is_logged_in()) {
         redirect('/login.php');
     }
+    
+    // === НОВОЕ: Автоматическое обновление статуса "в сети" ===
+    // Обновляем last_active в БД, но не чаще одного раза в 60 секунд,
+    // чтобы не создавать лишнюю нагрузку на базу данных.
+    $lastUpdate = $_SESSION['last_active_update'] ?? 0;
+    if (time() - $lastUpdate > 60) {
+        try {
+            db()->prepare("UPDATE users SET last_active = NOW() WHERE id = ?")
+              ->execute([$_SESSION['user_id']]);
+            $_SESSION['last_active_update'] = time();
+        } catch (\Exception $e) {
+            // Тихо игнорируем ошибки БД, чтобы не ломать загрузку страницы
+        }
+    }
+    // =========================================================
 }
 
 function require_guest (): void {
@@ -175,6 +194,46 @@ function fetch_data(array $queries): array {
         };
     }
     return $result;
+}
+
+/**
+ * Расстояние Левенштейна для многобайтовых строк (UTF-8).
+ * Работает посимвольно, корректно для кириллицы.
+ */
+function mb_levenshtein(string $s1, string $s2): int {
+    $len1 = mb_strlen($s1);
+    $len2 = mb_strlen($s2);
+
+    // Разбиваем строки на массивы символов
+    $a = [];
+    for ($i = 0; $i < $len1; $i++) {
+        $a[] = mb_substr($s1, $i, 1);
+    }
+    $b = [];
+    for ($i = 0; $i < $len2; $i++) {
+        $b[] = mb_substr($s2, $i, 1);
+    }
+
+    $matrix = [];
+    for ($i = 0; $i <= $len1; $i++) {
+        $matrix[$i][0] = $i;
+    }
+    for ($j = 0; $j <= $len2; $j++) {
+        $matrix[0][$j] = $j;
+    }
+
+    for ($i = 1; $i <= $len1; $i++) {
+        for ($j = 1; $j <= $len2; $j++) {
+            $cost = ($a[$i - 1] === $b[$j - 1]) ? 0 : 1;
+            $matrix[$i][$j] = min(
+                $matrix[$i - 1][$j] + 1,          // удаление
+                $matrix[$i][$j - 1] + 1,          // вставка
+                $matrix[$i - 1][$j - 1] + $cost   // замена
+            );
+        }
+    }
+
+    return $matrix[$len1][$len2];
 }
 
 // ПАГИНАЦИЯ

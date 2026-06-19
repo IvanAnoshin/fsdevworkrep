@@ -1,0 +1,380 @@
+/* ==================== ПРОФИЛЬ (полные стили) ==================== */
+
+/* ---------- Контейнеры ---------- */
+.profileContainer {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    margin-top: 20px;
+}
+
+.profileCard {
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+    background-color: white;
+    border-radius: 20px 20px 0 0;
+    padding: 24px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+    width: 100%;
+    max-width: 800px;
+    box-sizing: border-box;
+}
+
+.profileCardInfo {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    flex: 1;
+    min-width: 0;
+}
+
+/* ---------- Аватар ---------- */
+.profileAvatar {
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    background-color: #eef1f8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.profileAvatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.profileAvatar .accountAvatarPlaceholder {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #4a4f63;
+}
+
+/* ---------- Имя и статус ---------- */
+.profileName {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #f0f2f5;
+}
+
+.profileNameText {
+    font-size: 1.6rem;
+    color: black;
+    letter-spacing: -0.5px;
+}
+
+.profileStatus {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #10b981;
+    background: #ecfdf5;
+    padding: 4px 12px;
+    border-radius: 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ---------- Био ---------- */
+.bio {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.bioItem {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 1em;
+    line-height: 2.2;
+}
+
+.bioIcon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.bioIcon svg {
+    width: 18px;
+    height: 18px;
+    display: block;
+    margin: 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.bioLabel {
+    color: #8b8fa3;
+    font-weight: 500;
+    min-width: 130px;
+    flex-shrink: 0;
+}
+
+.bioValue {
+    color: #1e1e2f;
+    font-weight: 500;
+    flex: 1;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+/* ---------- Навигация профиля ---------- */
+.profileNavigation {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background-color: white;
+    border-radius: 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    width: fit-content;
+    margin: 24px auto;
+}
+
+.profileNavigation__btn {
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #5a6072;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.profileNavigation__btn--active {
+    background: #3b5dd3;
+    color: white;
+}
+
+.profileContent {
+    display: flex;
+    justify-content: center;
+    flex-direction: column;
+}
+
+.profileNavigationWrapper {
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin: 0 auto;
+    display: flex;
+    justify-content: center;
+}
+
+.profileNavigationWrapper::-webkit-scrollbar {
+    display: none;
+}
+
+/* ---------- Постинг ---------- */
+.postingSection {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 600px;
+    margin: 20px auto 0;
+    background: white;
+    border-radius: 20px;
+    padding: 10px 16px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+    box-sizing: border-box;
+}
+
+.postingRow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.profilePinButton,
+.sendButton {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: background 0.2s;
+    flex-shrink: 0;
+}
+
+.postingRow .profilePinButton,
+.postingRow .sendButton {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 50%;
+    transition: background 0.2s;
+}
+
+#profilePostingInput {
+    flex: 1;
+    min-height: 36px;
+    max-height: 100px;
+    border-radius: 20px;
+    border: 1px solid #e0e0e0;
+    padding: 8px 14px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    resize: none;
+    background-color: #fafafa;
+    transition: border-color 0.2s;
+    outline: none;
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+
+#profilePostingInput::-webkit-scrollbar {
+    display: none;
+}
+
+#profilePostingInput:focus {
+    border-color: #7c3aed;
+    background-color: #fff;
+}
+
+/* ---------- Фотоальбомы ---------- */
+.facebookSection {
+    background-color: #ffffff;
+    border-radius: 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.04);
+    max-width: 800px;
+    width: 100%;
+    margin-bottom: 24px;
+}
+
+.facebookLabel {
+    display: flex;
+    align-items: center;
+    margin-top: 10px;
+    margin-left: 25px;
+    margin-right: 25px;
+    margin-bottom: 16px;
+}
+
+.facebookLabel p {
+    font-size: 2em;
+    font-weight: 500;
+    color: #1e1e2f;
+    margin: 0;
+    padding: 0;
+}
+
+.facebook {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    padding-bottom: 20px;
+}
+
+.facebook img {
+    border: none;
+}
+
+.facebookPicture {
+    width: 250px;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    box-sizing: border-box;
+}
+
+/* ---------- Раскрывающийся блок личной информации ---------- */
+.bio-wrapper {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease;
+}
+
+.bio-wrapper.open {
+    max-height: 600px;  /* достаточно для содержимого */
+}
+
+.btn--more {
+    background: none;
+    border: none;
+    color: #3b5dd3;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    padding: 4px 12px;
+    border-radius: 8px;
+    transition: background 0.2s;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.btn--more:hover {
+    background: #f0f2f5;
+}
+
+/* ==================== КНОПКА "БОЛЬШЕ" И BIO-WRAPPER ==================== */
+.btn--more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 0.9em;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid #e0e0e0;
+    background: #fff;
+    color: #3b5dd3;
+    transition: all 0.2s;
+    margin-left: 12px;
+}
+
+.btn--more:hover {
+    background: #f0f4ff;
+    border-color: #3b5dd3;
+}
+
+.bio-wrapper {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease;
+}
+
+.bio-wrapper.open {
+    max-height: 600px;
+}
+
+/* Скрываем скроллбар у навигации */
+.profileNavigationWrapper {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+}
+
+.profileNavigationWrapper::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+}

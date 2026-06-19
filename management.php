@@ -1,5 +1,5 @@
 <?php
-// management.php – Административная панель Friendscape (без Chart.js)
+// management.php – Административная панель Friendscape
 declare(strict_types=1);
 
 require_once __DIR__ . '/kopilot/kopilot_init.php';
@@ -28,7 +28,7 @@ function get_flash_messages(): array {
 
 // Маршрутизация разделов
 $section = $_GET['section'] ?? 'dashboard';
-$allowedSections = ['dashboard', 'users', 'content', 'messages', 'reports', 'logs', 'system'];
+$allowedSections = ['dashboard', 'users', 'content', 'messages', 'reports', 'logs', 'system', 'recovery'];
 if (!in_array($section, $allowedSections)) {
     $section = 'dashboard';
 }
@@ -64,12 +64,10 @@ if (!in_array($section, $allowedSections)) {
         .btn-secondary { background: #e5e7eb; color: #111; }
         .pagination { display: flex; gap: 8px; margin-top: 20px; justify-content: center; }
         .pagination button { min-width: 36px; }
-        /* Простые графики */
         .chart-bar-wrap { display: flex; align-items: center; margin-bottom: 4px; }
         .chart-label { width: 40px; font-size: 0.8em; color: #555; }
         .chart-bar { height: 20px; background: #3b5dd3; border-radius: 4px; min-width: 2px; transition: width 0.3s; }
         .chart-value { margin-left: 6px; font-size: 0.8em; color: #111; }
-        /* Модалка подтверждения */
         .modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000;
@@ -90,6 +88,7 @@ if (!in_array($section, $allowedSections)) {
         <a href="?section=content" class="<?= $section === 'content' ? 'active' : '' ?>">📝 Контент</a>
         <a href="?section=messages" class="<?= $section === 'messages' ? 'active' : '' ?>">💬 Сообщения</a>
         <a href="?section=reports" class="<?= $section === 'reports' ? 'active' : '' ?>">🚩 Жалобы</a>
+        <a href="?section=recovery" class="<?= $section === 'recovery' ? 'active' : '' ?>">🔑 Восстановление</a>
         <a href="?section=logs" class="<?= $section === 'logs' ? 'active' : '' ?>">📋 Логи</a>
         <a href="?section=system" class="<?= $section === 'system' ? 'active' : '' ?>">⚙️ Система</a>
         <hr style="border-color:#333;">
@@ -173,6 +172,12 @@ if (!in_array($section, $allowedSections)) {
             <div id="reports-pagination" class="pagination"></div>
         <?php endif; ?>
 
+        <!-- Восстановление паролей -->
+        <?php if ($section === 'recovery'): ?>
+            <h2>🔑 Восстановление паролей</h2>
+            <div id="recovery-list-container"></div>
+        <?php endif; ?>
+
         <!-- Логи -->
         <?php if ($section === 'logs'): ?>
             <h2>📋 Логи администратора</h2>
@@ -196,7 +201,7 @@ if (!in_array($section, $allowedSections)) {
     </main>
 </div>
 
-<!-- Модальное окно подтверждения (кастомный confirm) -->
+<!-- Модальное окно подтверждения -->
 <div id="confirm-modal" class="modal-overlay" style="display:none;">
     <div class="modal-container" style="max-width:400px; padding:20px;">
         <h3 id="confirm-title" style="margin-top:0;">Подтверждение</h3>
@@ -238,25 +243,20 @@ if (!in_array($section, $allowedSections)) {
         setTimeout(() => div.remove(), 3000);
     }
 
-    // Кастомное подтверждение
     function showConfirm(title, message, onConfirm, onCancel) {
         const modal = document.getElementById('confirm-modal');
         document.getElementById('confirm-title').textContent = title;
         document.getElementById('confirm-message').textContent = message;
         modal.style.display = 'flex';
         setTimeout(() => modal.classList.add('active'), 10);
-
         const close = () => {
             modal.classList.remove('active');
             setTimeout(() => { modal.style.display = 'none'; }, 300);
         };
-
-        // Убираем старые обработчики
         const okBtn = document.getElementById('confirm-ok-btn');
         const cancelBtn = document.getElementById('confirm-cancel-btn');
         okBtn.replaceWith(okBtn.cloneNode(true));
         cancelBtn.replaceWith(cancelBtn.cloneNode(true));
-
         document.getElementById('confirm-ok-btn').addEventListener('click', () => {
             close();
             if (onConfirm) onConfirm();
@@ -272,6 +272,71 @@ if (!in_array($section, $allowedSections)) {
             }
         });
     }
+
+    // ========== ВОССТАНОВЛЕНИЕ ПАРОЛЕЙ ==========
+    <?php if ($section === 'recovery'): ?>
+    async function loadRecoveryRequests() {
+        const container = document.getElementById('recovery-list-container');
+        container.innerHTML = '<p>Загрузка...</p>';
+        try {
+            const data = await apiGet('/api/admin/recovery-requests');
+            if (data.requests && data.requests.length > 0) {
+                let html = `<table><tr><th>ID</th><th>Пользователь</th><th>Дата заявки</th><th>Действия</th></tr>`;
+                data.requests.forEach(r => {
+                    html += `<tr>
+                        <td>${r.id}</td>
+                        <td>${esc(r.full_name)} (ID ${r.user_id})</td>
+                        <td>${new Date(r.created_at).toLocaleString('ru')}</td>
+                        <td>
+                            <button class="btn btn-primary" onclick="resolveRequest(${r.id}, '${esc(r.full_name)}')">Сбросить пароль</button>
+                            <button class="btn btn-danger" onclick="rejectRequest(${r.id}, '${esc(r.full_name)}')">Отклонить</button>
+                        </td>
+                    </tr>`;
+                });
+                html += '</table>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<p style="color:#8b8fa3; text-align:center; padding:20px;">Нет открытых заявок</p>';
+            }
+        } catch(e) {
+            container.innerHTML = '<p style="color:#b91c1c;">Ошибка загрузки</p>';
+        }
+    }
+
+    async function resolveRequest(requestId, fullName) {
+        showConfirm('Сбросить пароль', `Пользователю ${fullName} будет сгенерирован новый пароль. Продолжить?`, async () => {
+            try {
+                const data = await apiPost(`/api/admin/recovery-requests/${requestId}/resolve`);
+                if (data.success) {
+                    alert(`Новый пароль: ${data.new_password}\nСообщите его пользователю.`);
+                    loadRecoveryRequests();
+                } else {
+                    flash('error', data.error || 'Ошибка');
+                }
+            } catch(e) {
+                flash('error', 'Ошибка соединения');
+            }
+        });
+    }
+
+    async function rejectRequest(requestId, fullName) {
+        showConfirm('Отклонить заявку', `Отклонить заявку от ${fullName}?`, async () => {
+            try {
+                const data = await apiPost(`/api/admin/recovery-requests/${requestId}/reject`);
+                if (data.success) {
+                    flash('success', 'Заявка отклонена');
+                    loadRecoveryRequests();
+                } else {
+                    flash('error', data.error || 'Ошибка');
+                }
+            } catch(e) {
+                flash('error', 'Ошибка соединения');
+            }
+        });
+    }
+
+    loadRecoveryRequests();
+    <?php endif; ?>
 
     // ========== ДАШБОРД ==========
     <?php if ($section === 'dashboard'): ?>
@@ -291,7 +356,6 @@ if (!in_array($section, $allowedSections)) {
             <div class="stat-card"><div class="stat-value">${stats.db_size_mb} МБ</div><div class="stat-label">Размер БД</div></div>
         `;
 
-        // Простые графики (бары)
         const regData = await apiGet('/api/admin/registrations-daily');
         const maxReg = Math.max(...regData.values, 1);
         let regHtml = '';

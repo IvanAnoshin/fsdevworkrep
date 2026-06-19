@@ -3,10 +3,14 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
+/*
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
     throw new ErrorException($errstr, 0, $errno, $errfile, $errline);
 });
+*/
 require_once __DIR__ . '/kopilot/kopilot_init.php';
+require_once __DIR__ . '/dfsn.php';
+dfsn_install_tables();
 
 function is_admin(): bool {
     $userId = $_SESSION['user_id'] ?? 0;
@@ -120,28 +124,74 @@ $router->api('POST', '/api/user/update-bio', function() {
     return ['bio' => $data['bio']];
 });
 
+// ---------- ПРИВАТНОСТЬ (РАСШИРЕННАЯ) ----------
 $router->api('POST', '/api/user/update-privacy', function() {
     require_auth();
     $data = json_decode(file_get_contents('php://input'), true);
     $updates = [];
-    if (isset($data['privacy_posts']) && in_array($data['privacy_posts'], ['public','friends','self'])) {
-        $updates['privacy_posts'] = $data['privacy_posts'];
+
+    // Селекты с допустимыми значениями
+    $allowedSelects = [
+        'privacy_posts'    => ['public','friends','self'],
+        'privacy_messages'  => ['all','friends','nobody'],
+        'privacy_albums'    => ['public','friends','self'],
+        'privacy_comments'  => ['public','friends','self'],
+        'privacy_info'      => ['public','friends','self'],
+    ];
+
+    foreach ($allowedSelects as $field => $values) {
+        if (isset($data[$field]) && in_array($data[$field], $values)) {
+            $updates[$field] = $data[$field];
+        }
     }
-    if (isset($data['privacy_messages']) && in_array($data['privacy_messages'], ['all','friends','nobody'])) {
-        $updates['privacy_messages'] = $data['privacy_messages'];
+
+    // Чекбоксы (булевы)
+    $booleanFields = [
+        'show_online',
+        'unwanted_communication',
+        'read_receipt',
+    ];
+
+    foreach ($booleanFields as $field) {
+        if (array_key_exists($field, $data)) {
+            $updates[$field] = (bool)$data[$field] ? 1 : 0;
+        }
     }
-    if (isset($data['show_online'])) $updates['show_online'] = (bool)$data['show_online'] ? 1 : 0;
-    if (!empty($updates)) update('users', $_SESSION['user_id'], $updates);
+
+    if (!empty($updates)) {
+        update('users', $_SESSION['user_id'], $updates);
+    }
+
     return ['success' => true];
 });
 
+// ---------- УВЕДОМЛЕНИЯ (РАСШИРЕННЫЕ) ----------
 $router->api('POST', '/api/user/update-notifications', function() {
     require_auth();
     $data = json_decode(file_get_contents('php://input'), true);
     $updates = [];
-    if (isset($data['notify_sound'])) $updates['notify_sound'] = (bool)$data['notify_sound'] ? 1 : 0;
-    if (isset($data['notify_push'])) $updates['notify_push'] = (bool)$data['notify_push'] ? 1 : 0;
-    if (!empty($updates)) update('users', $_SESSION['user_id'], $updates);
+
+    $booleanFields = [
+        'notify_sound',
+        'notify_push',
+        'notify_followers',
+        'notify_likes',
+        'notify_comments',
+        'notify_mentions',
+        'notify_new_login',
+        'notify_security_changes',
+    ];
+
+    foreach ($booleanFields as $field) {
+        if (array_key_exists($field, $data)) {
+            $updates[$field] = (bool)$data[$field] ? 1 : 0;
+        }
+    }
+
+    if (!empty($updates)) {
+        update('users', $_SESSION['user_id'], $updates);
+    }
+
     return ['success' => true];
 });
 
@@ -749,10 +799,10 @@ $router->api('GET', '/api/search/users', function() {
     $candidates = select("SELECT id, first_name, last_name, avatar FROM users WHERE $where LIMIT 200", $params);
 
     // Функция для вычисления расстояния Левенштейна между двумя строками
-    $levenshtein = function($s1, $s2) {
+    $mb_levenshtein = function($s1, $s2) {
         $s1 = mb_strtolower($s1);
         $s2 = mb_strtolower($s2);
-        return levenshtein($s1, $s2);
+        return mb_levenshtein($s1, $s2);
     };
 
     // Для каждого кандидата проверяем, насколько его имя или фамилия близки к каждому слову запроса
@@ -773,7 +823,7 @@ $router->api('GET', '/api/search/users', function() {
                 }
                 // Иначе вычисляем расстояние Левенштейна между словом и частью
                 // (для длинных частей можно проверять расстояние на подстроках, но для MVP допустим прямое сравнение)
-                $dist = $levenshtein($wordLower, $part);
+                $dist = $mb_levenshtein($wordLower, $part);
                 if ($dist <= $maxDist($wordLower)) {
                     $found = true;
                     break;
@@ -1749,37 +1799,61 @@ $router->api('POST', '/api/dfsn/endorse', function() {
     require_once __DIR__ . '/dfsn.php';
     $dfsn = new DFSN();
 
+    // Создаём веса заранее, чтобы избежать ошибки "table not found" внутри DFSN
+    $dfsn->getUserWeights($fromUserId);
+    $dfsn->getUserWeights($toUserId);
+
     try {
         $result = $dfsn->processEndorsement($fromUserId, $toUserId);
-        switch ($result) {
-            case 'success':
-                return ['success' => true, 'message' => 'Поручительство принято'];
-            case 'self_endorsement_denied':
-                http_response_code(422);
-                return ['error' => 'Нельзя поручиться за самого себя'];
-            case 'low_activity_denied':
-                http_response_code(403);
-                return ['error' => 'Недостаточная активность для поручительства'];
-            case 'daily_limit_reached':
-                http_response_code(429);
-                return ['error' => 'Достигнут дневной лимит поручительств'];
-            case 'total_limit_reached':
-                http_response_code(429);
-                return ['error' => 'Достигнут общий лимит поручительств'];
-            case 'already_endorsed':
-                http_response_code(409);
-                return ['error' => 'Вы уже поручились за этого пользователя'];
-            default:
-                http_response_code(500);
-                return ['error' => 'Неизвестная ошибка'];
-        }
-    } catch (\InvalidArgumentException $e) {
-        http_response_code(404);
-        return ['error' => $e->getMessage()];
     } catch (\Exception $e) {
-        error_log("DFSN Endorse exception: " . $e->getMessage());
+        error_log("DFSN process error: " . $e->getMessage());
         http_response_code(500);
-        return ['error' => 'Внутренняя ошибка'];
+        return ['error' => 'Внутренняя ошибка DFSN'];
+    }
+
+    if ($result === 'success') {
+        // Гарантированная вставка с проверкой результата
+        try {
+            $stmt = db()->prepare("INSERT IGNORE INTO dfsn_endorsements (from_user_id, to_user_id, coefficient, created_at) VALUES (?, ?, 0.05, ?)");
+            $stmt->execute([$fromUserId, $toUserId, time()]);
+            if ($stmt->rowCount() === 0) {
+                // Если INSERT IGNORE не вставил строку, проверяем, есть ли уже запись
+                $exists = scalar("SELECT COUNT(*) FROM dfsn_endorsements WHERE from_user_id = ? AND to_user_id = ?", [$fromUserId, $toUserId]);
+                if (!$exists) {
+                    // Строки нет, но вставка не прошла – проблема со структурой
+                    http_response_code(500);
+                    return ['error' => 'Ошибка сохранения: структура таблицы несовместима'];
+                }
+                // иначе уже существует – ок
+            }
+        } catch (\Exception $e) {
+            error_log("DFSN fallback insert error: " . $e->getMessage());
+            http_response_code(500);
+            return ['error' => 'Ошибка сохранения поручительства'];
+        }
+        return ['success' => true, 'message' => 'Поручительство принято'];
+    }
+
+    // Обработка других статусов
+    switch ($result) {
+        case 'self_endorsement_denied':
+            http_response_code(422);
+            return ['error' => 'Нельзя поручиться за самого себя'];
+        case 'low_activity_denied':
+            http_response_code(403);
+            return ['error' => 'Недостаточная активность для поручительства'];
+        case 'daily_limit_reached':
+            http_response_code(429);
+            return ['error' => 'Достигнут дневной лимит поручительств'];
+        case 'total_limit_reached':
+            http_response_code(429);
+            return ['error' => 'Достигнут общий лимит поручительств'];
+        case 'already_endorsed':
+            http_response_code(409);
+            return ['error' => 'Вы уже поручились за этого пользователя'];
+        default:
+            http_response_code(500);
+            return ['error' => 'Неизвестная ошибка'];
     }
 });
 
@@ -1893,11 +1967,11 @@ $router->api('GET', '/api/notifications', function () {
         "SELECT n.*, 
                 CONCAT(u.first_name, ' ', u.last_name) AS actor_name,
                 u.avatar AS actor_avatar
-         FROM notifications n
-         LEFT JOIN users u ON u.id = n.actor_id
-         $where
-         ORDER BY n.is_read ASC, n.created_at DESC
-         LIMIT $perPage OFFSET $offset",
+        FROM notifications n
+        LEFT JOIN users u ON u.id = n.actor_id
+        $where
+        ORDER BY n.is_read ASC, n.created_at DESC
+        LIMIT $perPage OFFSET $offset",
         $params
     );
 
@@ -2558,20 +2632,27 @@ $router->api('POST', '/api/report', function () {
     return ['success' => true];
 });
 
-// ---------- СТАТУС ПОЛЬЗОВАТЕЛЯ (ИСПОЛЬЗУЕТ last_active) ----------
+// ---------- СТАТУС ПОЛЬЗОВАТЕЛЯ ----------
 $router->api('GET', '/api/users/{id}/status', function ($id) {
     require_auth();
+    
+    // === КРИТИЧЕСКИ ВАЖНО: Полный запрет кэширования на уровне сервера ===
+    header('Cache-Control: no-cache, no-store, must-revalidate');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+    // ====================================================================
+
     $user = find('users', (int)$id);
     if (!$user) {
         http_response_code(404);
         return ['error' => 'Пользователь не найден'];
     }
-
+    
     $lastActive = $user['last_active'] ?? null;
     if (!$lastActive) {
         return ['text' => '○ был(а) давно', 'class' => 'profileStatus--offline'];
     }
-
+    
     $diff = time() - strtotime($lastActive);
     if ($diff < 300) {
         return ['text' => '● в сети', 'class' => 'profileStatus--online'];
@@ -2580,6 +2661,7 @@ $router->api('GET', '/api/users/{id}/status', function ($id) {
     } elseif ($diff < 86400) {
         return ['text' => '○ был(а) сегодня', 'class' => 'profileStatus--offline'];
     }
+    
     return ['text' => '○ был(а) давно', 'class' => 'profileStatus--offline'];
 });
 
@@ -2587,6 +2669,589 @@ $router->api('GET', '/api/users/{id}/status', function ($id) {
 $router->api('POST', '/api/ping', function () {
     require_auth();
     return ['success' => true];
+});
+
+$router->api('POST', '/api/admin/recovery-requests/{id}/resolve', function ($id) {
+    require_auth();
+    if (!is_admin()) {
+        http_response_code(403);
+        return ['error' => 'Forbidden'];
+    }
+
+    $request = find('recovery_requests', (int)$id);
+    if (!$request || $request['status'] !== 'open') {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена или уже обработана'];
+    }
+
+    $userId = $request['user_id'];
+    $newPassword = bin2hex(random_bytes(4));
+    $hashed = password_hash($newPassword, PASSWORD_DEFAULT);
+
+    db()->beginTransaction();
+    try {
+        db()->prepare("UPDATE users SET password = ? WHERE id = ?")->execute([$hashed, $userId]);
+        db()->prepare("UPDATE recovery_requests SET status = 'resolved' WHERE id = ?")->execute([(int)$id]);
+        log_admin_action('resolve_recovery', $userId, "request $id");
+        db()->commit();
+    } catch (\Exception $e) {
+        db()->rollBack();
+        error_log("Recovery resolve error: " . $e->getMessage());
+        http_response_code(500);
+        return ['error' => 'Ошибка базы данных'];
+    }
+
+    return [
+        'success'      => true,
+        'new_password' => $newPassword,
+        'user_id'      => $userId
+    ];
+});
+
+$router->api('POST', '/api/admin/recovery-requests/{id}/reject', function ($id) {
+    require_auth();
+    if (!is_admin()) {
+        http_response_code(403);
+        return ['error' => 'Forbidden'];
+    }
+
+    $request = find('recovery_requests', (int)$id);
+    if (!$request || $request['status'] !== 'open') {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена или уже обработана'];
+    }
+
+    try {
+        db()->prepare("UPDATE recovery_requests SET status = 'rejected' WHERE id = ?")->execute([(int)$id]);
+        log_admin_action('reject_recovery', $request['user_id'], "request $id");
+    } catch (\Exception $e) {
+        error_log("Recovery reject error: " . $e->getMessage());
+        http_response_code(500);
+        return ['error' => 'Ошибка базы данных'];
+    }
+
+    return ['success' => true];
+});
+
+// ---------- ЗАЯВКИ НА ВОССТАНОВЛЕНИЕ ПАРОЛЯ (админ) ----------
+$router->api('GET', '/api/admin/recovery-requests', function () {
+    require_auth();
+    if (!is_admin()) {
+        http_response_code(403);
+        return ['error' => 'Forbidden'];
+    }
+
+    $page    = max(1, (int)($_GET['page'] ?? 1));
+    $perPage = 20;
+    $offset  = ($page - 1) * $perPage;
+
+    $total    = scalar("SELECT COUNT(*) FROM recovery_requests WHERE status = 'open'");
+    $lastPage = max(1, (int)ceil($total / $perPage));
+
+    $requests = select(
+        "SELECT r.id, r.user_id, r.created_at,
+                CONCAT(u.first_name, ' ', u.last_name) AS full_name
+         FROM recovery_requests r
+         JOIN users u ON u.id = r.user_id
+         WHERE r.status = 'open'
+         ORDER BY r.created_at ASC
+         LIMIT $perPage OFFSET $offset"
+    );
+
+    return [
+        'requests' => $requests,
+        'page'     => $page,
+        'lastPage' => $lastPage,
+        'total'    => $total
+    ];
+});
+
+$router->api('POST', '/api/admin/recovery-requests/{id}/resolve', function ($id) {
+    require_auth();
+    if (!is_admin()) {
+        http_response_code(403);
+        return ['error' => 'Forbidden'];
+    }
+
+    $request = find('recovery_requests', (int)$id);
+    if (!$request || $request['status'] !== 'open') {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена или уже обработана'];
+    }
+
+    $userId = $request['user_id'];
+    $newPassword = bin2hex(random_bytes(4));
+    $hashed = password_hash($newPassword, PASSWORD_DEFAULT);
+
+    db()->beginTransaction();
+    try {
+        db()->prepare("UPDATE users SET password = ? WHERE id = ?")->execute([$hashed, $userId]);
+        db()->prepare("UPDATE recovery_requests SET status = 'resolved' WHERE id = ?")->execute([(int)$id]);
+        log_admin_action('resolve_recovery', $userId, "request $id");
+        db()->commit();
+    } catch (\Exception $e) {
+        db()->rollBack();
+        error_log("Recovery resolve error: " . $e->getMessage());
+        http_response_code(500);
+        return ['error' => 'Ошибка базы данных'];
+    }
+
+    return [
+        'success'      => true,
+        'new_password' => $newPassword,
+        'user_id'      => $userId
+    ];
+});
+
+$router->api('POST', '/api/admin/recovery-requests/{id}/reject', function ($id) {
+    require_auth();
+    if (!is_admin()) {
+        http_response_code(403);
+        return ['error' => 'Forbidden'];
+    }
+
+    $request = find('recovery_requests', (int)$id);
+    if (!$request || $request['status'] !== 'open') {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена или уже обработана'];
+    }
+
+    try {
+        db()->prepare("UPDATE recovery_requests SET status = 'rejected' WHERE id = ?")->execute([(int)$id]);
+        log_admin_action('reject_recovery', $request['user_id'], "request $id");
+    } catch (\Exception $e) {
+        error_log("Recovery reject error: " . $e->getMessage());
+        http_response_code(500);
+        return ['error' => 'Ошибка базы данных'];
+    }
+
+    return ['success' => true];
+});
+
+// ========== ИСПРАВЛЕННЫЕ ЭНДПОИНТЫ ВОССТАНОВЛЕНИЯ ==========
+
+$router->api('POST', '/api/recovery/friend-approve', function () {
+    require_auth();
+    $data = json_decode(file_get_contents('php://input'), true);
+    $requestId = (int)($data['request_id'] ?? 0);
+    $token     = $data['token'] ?? '';
+
+    if ($requestId <= 0 || $token === '') {
+        http_response_code(400);
+        return ['error' => 'Неверные параметры'];
+    }
+
+    $request = find('recovery_requests', $requestId);
+    if (!$request || $request['token'] !== $token) {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена или токен неверен'];
+    }
+
+    // --- ПРОВЕРКА СТАТУСА ---
+    $currentStatus = $request['status'];
+    if ($currentStatus !== 'pending') {
+        http_response_code(409); // Conflict - статус не позволяет
+        return ['error' => 'Заявка в статусе, не позволяющем подтверждение другом'];
+    }
+    // --- /ПРОВЕРКА СТАТУСА ---
+
+    if ($request['friend_id'] != $_SESSION['user_id']) {
+        http_response_code(403);
+        return ['error' => 'Вы не можете подтвердить эту заявку'];
+    }
+
+    $userId = $request['user_id'];
+    $newPassword = bin2hex(random_bytes(4));
+
+    db()->prepare("UPDATE recovery_requests SET status = 'awaiting_owner_after_friend', new_password_plain = ?, friend_confirmed_at = NOW() WHERE id = ?")
+        ->execute([$newPassword, $requestId]);
+
+    db()->prepare("UPDATE notifications SET extra = JSON_SET(extra, '$.can_cancel', true), is_read = 0 WHERE user_id = ? AND type = 'recovery_alert' AND extra LIKE ?")
+        ->execute([$_SESSION['user_id'], '%"request_id":' . $requestId . '%']);
+
+    log_admin_action('recovery_approved_by_friend', $userId, "request $requestId");
+    return ['success' => true];
+});
+
+$router->api('POST', '/api/recovery/friend-reject', function () {
+    require_auth();
+    $data = json_decode(file_get_contents('php://input'), true);
+    $requestId = (int)($data['request_id'] ?? 0);
+    $token     = $data['token'] ?? '';
+
+    if ($requestId <= 0 || $token === '') {
+        http_response_code(400);
+        return ['error' => 'Неверные параметры'];
+    }
+
+    $request = find('recovery_requests', $requestId);
+    if (!$request || $request['token'] !== $token) {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена или токен неверен'];
+    }
+
+    // --- ПРОВЕРКА СТАТУСА ---
+    $currentStatus = $request['status'];
+    if ($currentStatus !== 'pending') {
+        http_response_code(409); // Conflict - статус не позволяет
+        return ['error' => 'Заявка в статусе, не позволяющем отклонение другом'];
+    }
+    // --- /ПРОВЕРКА СТАТУСА ---
+
+    if ($request['friend_id'] != $_SESSION['user_id']) {
+        http_response_code(403);
+        return ['error' => 'Вы не можете отклонить эту заявку'];
+    }
+
+    $userId = $request['user_id'];
+    $newPassport = bin2hex(random_bytes(8));
+    $hashedPassport = password_hash($newPassport, PASSWORD_DEFAULT);
+    db()->prepare("UPDATE users SET passport_hash = ? WHERE id = ?")->execute([$hashedPassport, $userId]);
+    db()->prepare("UPDATE recovery_requests SET status = 'cancelled_by_friend' WHERE id = ?")->execute([$requestId]);
+
+    db()->prepare("DELETE FROM notifications WHERE (type = 'recovery_alert' OR type = 'recovery_request_initial') AND extra LIKE ?")
+        ->execute(['%"request_id":' . $requestId . '%']);
+
+    log_admin_action('recovery_rejected_by_friend', $userId, "request $requestId");
+    return ['success' => true, 'message' => 'Заявка отклонена. Паспорт владельца обновлён.'];
+});
+
+$router->api('POST', '/api/recovery/friend-cancel', function () {
+    require_auth();
+    $data = json_decode(file_get_contents('php://input'), true);
+    $requestId = (int)($data['request_id'] ?? 0);
+
+    if ($requestId <= 0) {
+        http_response_code(400);
+        return ['error' => 'Неверный ID заявки'];
+    }
+
+    $request = find('recovery_requests', $requestId);
+    if (!$request) {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена'];
+    }
+
+    // --- ПРОВЕРКА СТАТУСА ---
+    $currentStatus = $request['status'];
+    // Разрешаем отмену только если статус 'awaiting_owner_after_friend' и друг подтвердил
+    if ($currentStatus !== 'awaiting_owner_after_friend') {
+        http_response_code(409); // Conflict - статус не позволяет
+        return ['error' => 'Заявка в статусе, не позволяющем отмену подтверждения'];
+    }
+    // Также проверяем, что текущий пользователь - тот самый друг
+    if ($request['friend_id'] != $_SESSION['user_id']) {
+        http_response_code(403);
+        return ['error' => 'Вы не можете отменить эту заявку'];
+    }
+    // --- /ПРОВЕРКА СТАТУСА ---
+
+    db()->prepare("UPDATE recovery_requests SET status = 'pending', new_password_plain = NULL, friend_confirmed_at = NULL WHERE id = ?")
+        ->execute([$requestId]);
+
+    db()->prepare("UPDATE notifications SET extra = JSON_REMOVE(extra, '$.can_cancel'), is_read = 0 WHERE user_id = ? AND type = 'recovery_alert' AND extra LIKE ?")
+        ->execute([$_SESSION['user_id'], '%"request_id":' . $requestId . '%']);
+
+    log_admin_action('recovery_friend_cancel', $request['user_id'], "request $requestId");
+    return ['success' => true, 'message' => 'Подтверждение отменено. Заявка снова ожидает решения.'];
+});
+
+$router->api('POST', '/api/recovery/owner-cancel', function () {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $requestId = (int)($data['request_id'] ?? 0);
+    $token     = $data['token'] ?? '';
+
+    if ($requestId <= 0 || $token === '') {
+        http_response_code(400);
+        return ['error' => 'Неверные параметры'];
+    }
+
+    $request = find('recovery_requests', $requestId);
+    if (!$request || $request['token'] !== $token) {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена'];
+    }
+
+    // Проверяем, что это заявка для владельца (токен совпадает)
+    $userId = $request['user_id'];
+    // Проверяем сессию, если пользователь авторизован, он должен быть владельцем
+    if (is_logged_in() && $_SESSION['user_id'] != $userId) {
+         http_response_code(403);
+         return ['error' => 'Вы не можете отменить эту заявку'];
+    }
+
+    // --- ПРОВЕРКА СТАТУСА ---
+    $currentStatus = $request['status'];
+    // Разрешаем отмену только если статус 'awaiting_owner_after_friend'
+    if ($currentStatus !== 'awaiting_owner_after_friend') {
+        http_response_code(409); // Conflict - статус не позволяет
+        return ['error' => 'Заявка в статусе, не позволяющем отмену владельцем'];
+    }
+    // --- /ПРОВЕРКА СТАТУСА ---
+
+    $newPassport = bin2hex(random_bytes(8));
+    $hashedPassport = password_hash($newPassport, PASSWORD_DEFAULT);
+    db()->prepare("UPDATE users SET passport_hash = ? WHERE id = ?")->execute([$hashedPassport, $userId]);
+
+    db()->prepare("UPDATE recovery_requests SET status = 'cancelled_by_owner', owner_rejected_at = NOW() WHERE id = ?")->execute([$requestId]);
+
+    db()->prepare("DELETE FROM notifications WHERE (type = 'recovery_alert' OR type = 'recovery_request_initial') AND extra LIKE ?")
+        ->execute(['%"request_id":' . $requestId . '%']);
+
+    log_admin_action('recovery_cancelled_by_owner', $userId, "request $requestId");
+    return ['success' => true, 'message' => 'Восстановление отменено. Ваш паспорт обновлён.'];
+});
+
+$router->api('POST', '/api/recovery/approve', function () {
+    // require_auth(); // Владелец может быть не авторизован, если потерял доступ.
+    $data = json_decode(file_get_contents('php://input'), true);
+    $requestId = (int)($data['request_id'] ?? 0);
+    $token     = $data['token'] ?? '';
+
+    if ($requestId <= 0 || $token === '') {
+        http_response_code(400);
+        return ['error' => 'Неверные параметры'];
+    }
+
+    $request = find('recovery_requests', $requestId);
+    if (!$request || $request['token'] !== $token) {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена'];
+    }
+
+    $userId = $request['user_id'];
+    // Проверяем сессию, если пользователь авторизован, он должен быть владельцем
+    if (is_logged_in() && $_SESSION['user_id'] != $userId) {
+         http_response_code(403);
+         return ['error' => 'Вы не можете подтвердить эту заявку'];
+    }
+
+    // --- ПРОВЕРКА СТАТУСА ---
+    $currentStatus = $request['status'];
+    // Разрешаем только для pending или awaiting_owner_after_friend
+    if (!in_array($currentStatus, ['pending', 'awaiting_owner_after_friend'])) {
+        http_response_code(409); // Conflict - статус не позволяет
+        return ['error' => 'Заявка в статусе, не позволяющем подтверждение'];
+    }
+    // --- /ПРОВЕРКА СТАТУСА ---
+
+    $newPassword = $request['new_password_plain'];
+    if (!$newPassword) {
+        $newPassword = bin2hex(random_bytes(4));
+    }
+
+    $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
+    db()->prepare("UPDATE users SET password = ? WHERE id = ?")->execute([$hashedPassword, $userId]);
+
+    $newPassport = bin2hex(random_bytes(8));
+    $hashedPassport = password_hash($newPassport, PASSWORD_DEFAULT);
+    db()->prepare("UPDATE users SET passport_hash = ? WHERE id = ?")->execute([$hashedPassport, $userId]);
+
+    db()->prepare("UPDATE recovery_requests SET status = 'completed', new_passport_plain = ?, owner_confirmed_at = NOW() WHERE id = ?")
+        ->execute([$newPassport, $requestId]);
+
+    db()->prepare("DELETE FROM notifications WHERE (type = 'recovery_alert' OR type = 'recovery_request_initial') AND extra LIKE ?")
+        ->execute(['%"request_id":' . $requestId . '%']);
+
+    log_admin_action('recovery_approved_immediately', $userId, "request $requestId");
+
+    return [
+        'success' => true,
+        'password' => $newPassword,
+        'passport' => $newPassport
+    ];
+});
+
+$router->api('POST', '/api/recovery/reject', function () {
+    // require_auth(); // Владелец может быть не авторизован, если потерял доступ.
+    $data = json_decode(file_get_contents('php://input'), true);
+    $requestId = (int)($data['request_id'] ?? 0);
+    $token     = $data['token'] ?? '';
+
+    if ($requestId <= 0 || $token === '') {
+        http_response_code(400);
+        return ['error' => 'Неверные параметры'];
+    }
+
+    $request = find('recovery_requests', $requestId);
+    if (!$request || $request['token'] !== $token) {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена'];
+    }
+
+    $userId = $request['user_id'];
+    // Проверяем сессию, если пользователь авторизован, он должен быть владельцем
+    if (is_logged_in() && $_SESSION['user_id'] != $userId) {
+         http_response_code(403);
+         return ['error' => 'Вы не можете отклонить эту заявку'];
+    }
+
+    // --- ПРОВЕРКА СТАТУСА ---
+    $currentStatus = $request['status'];
+    // Разрешаем только для pending или awaiting_owner_after_friend
+    if (!in_array($currentStatus, ['pending', 'awaiting_owner_after_friend'])) {
+        http_response_code(409); // Conflict - статус не позволяет
+        return ['error' => 'Заявка в статусе, не позволяющем отклонение'];
+    }
+    // --- /ПРОВЕРКА СТАТУСА ---
+
+    $newPassport = bin2hex(random_bytes(8));
+    $hashedPassport = password_hash($newPassport, PASSWORD_DEFAULT);
+    db()->prepare("UPDATE users SET passport_hash = ? WHERE id = ?")->execute([$hashedPassport, $userId]);
+
+    db()->prepare("UPDATE recovery_requests SET status = 'rejected', owner_rejected_at = NOW() WHERE id = ?")->execute([$requestId]);
+
+    db()->prepare("DELETE FROM notifications WHERE (type = 'recovery_alert' OR type = 'recovery_request_initial') AND extra LIKE ?")
+        ->execute(['%"request_id":' . $requestId . '%']);
+
+    log_admin_action('recovery_rejected_by_owner', $userId, "request $requestId");
+
+    return ['success' => true, 'message' => 'Заявка отклонена. Паспорт обновлён.'];
+});
+
+$router->api('GET', '/api/recovery/status', function () {
+    $requestId = (int)($_GET['request_id'] ?? 0);
+    $token     = $_GET['token'] ?? '';
+    if ($requestId <= 0 || $token === '') {
+        http_response_code(400);
+        return ['error' => 'Неверные параметры'];
+    }
+
+    $request = find('recovery_requests', $requestId);
+    if (!$request || $request['token'] !== $token) {
+        http_response_code(404);
+        return ['error' => 'Заявка не найдена'];
+    }
+
+    // Возвращаем текущий статус
+    $status = $request['status'];
+    if ($status === 'completed') {
+        $password = $request['new_password_plain'] ?? '';
+        $passport = $request['new_passport_plain'] ?? '';
+        db()->prepare("UPDATE recovery_requests SET new_password_plain = NULL, new_passport_plain = NULL WHERE id = ?")
+            ->execute([$requestId]);
+        return [
+            'status' => 'completed',
+            'password' => $password,
+            'passport' => $passport
+        ];
+    }
+
+    // Возвращаем статус как есть
+    return ['status' => $status];
+});
+
+// ========== ПАСПОРТ ==========
+
+$router->api('GET', '/api/user/passport', function () {
+    require_auth();
+    $userId = $_SESSION['user_id'];
+    $user = find('users', $userId);
+    if (!$user) {
+        http_response_code(404);
+        return ['error' => 'Пользователь не найден'];
+    }
+    $hasPassport = !empty($user['passport_hash']);
+    if ($hasPassport) {
+        return ['has_passport' => true];
+    } else {
+        http_response_code(404);
+        return ['error' => 'Паспорт не найден'];
+    }
+});
+
+// Получить паспорт (с проверкой пароля)
+$router->api('POST', '/api/user/get-passport', function() {
+    $data = json_decode(file_get_contents('php://input'), true);
+    $password = $data['password'] ?? '';
+    
+    $user = find('users', $_SESSION['user_id']);
+    if (!$user || !password_verify($password, $user['password'])) {
+        return ['error' => 'Неверный пароль'];
+    }
+    
+    if (empty($user['passport_raw'])) {
+        return ['error' => 'Паспорт не найден. Сгенерируйте новый.'];
+    }
+    
+    return ['passport' => $user['passport_raw']];
+});
+
+// Сгенерировать новый паспорт
+$router->api('POST', '/api/user/generate-passport', function() {
+    $user = find('users', $_SESSION['user_id']);
+    if (!$user) {
+        return ['error' => 'Пользователь не найден'];
+    }
+    
+    $newRawPassport = bin2hex(random_bytes(8));
+    $newHashedPassport = password_hash($newRawPassport, PASSWORD_DEFAULT);
+    
+    update('users', $_SESSION['user_id'], [
+        'passport_hash' => $newHashedPassport,
+        'passport_raw' => $newRawPassport
+    ]);
+    
+    return ['new_passport' => $newRawPassport];
+});
+
+$router->api('POST', '/api/verify-password', function () {
+    require_auth();
+    $data = json_decode(file_get_contents('php://input'), true);
+    $password = $data['password'] ?? '';
+
+    if (empty($password)) {
+        http_response_code(422);
+        return ['error' => 'Пароль обязателен'];
+    }
+
+    $user = find('users', $_SESSION['user_id']);
+    if (!$user) {
+        http_response_code(404);
+        return ['error' => 'Пользователь не найден'];
+    }
+
+    if (!password_verify($password, $user['password'])) {
+        http_response_code(401);
+        return ['error' => 'Неверный пароль'];
+    }
+
+    // Получаем сырой паспорт, если есть
+    $passport = null;
+    if (!empty($user['passport_hash'])) {
+        // Поскольку хеш необратим, возвращаем только из сессии, если был сгенерирован
+        $passport = $_SESSION['last_generated_passport'] ?? null;
+    }
+
+    return ['success' => true, 'passport' => $passport];
+});
+
+// Проверка пароля для разблокировки паспорта
+$router->api('POST', '/api/user/verify-password', function () {
+    require_auth();
+    $data = json_decode(file_get_contents('php://input'), true);
+    $password = $data['password'] ?? '';
+    
+    $user = find('users', $_SESSION['user_id']);
+    if (!$user || !password_verify($password, $user['password'])) {
+        http_response_code(401);
+        return ['error' => 'Неверный пароль'];
+    }
+    
+    $_SESSION['passport_unlocked'] = true;
+    return ['success' => true];
+});
+
+// Проверка поручительства (уже есть, но убедимся что работает)
+$router->api('GET', '/api/check-endorsement', function() {
+    require_auth();
+    $from = (int)($_GET['from'] ?? 0);
+    $to = (int)($_GET['to'] ?? 0);
+    if ($from <= 0 || $to <= 0) {
+        return ['exists' => false];
+    }
+    $count = scalar("SELECT COUNT(*) FROM dfsn_endorsements WHERE from_user_id = ? AND to_user_id = ?", [$from, $to]);
+    return ['exists' => (int)$count > 0];
 });
 
 $router->dispatch($_SERVER['REQUEST_METHOD'], $_SERVER['REQUEST_URI']);
