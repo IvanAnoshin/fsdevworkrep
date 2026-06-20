@@ -81,16 +81,8 @@ max-height: none !important;
         height: 40px;
     }
 
-    .mainArea,
-    .messengerMainArea,
-    .settingsMainArea,
-    .searchArea {
-        margin-left: 80px;
-    }
-
     .chatList {
         width: 280px;
-        margin-left: 80px;
     }
 
     .profileCard {
@@ -793,18 +785,12 @@ html body #comments-modal .comment-avatar {
 /* Содержимое комментария */
 html body #comments-modal .comment-content {
     padding: 6px 10px !important;
-    font-size: 0.85em !important;
+    font-size: 1.2em !important;
 }
 
 /* Автор комментария */
 html body #comments-modal .comment-author a {
-    font-size: 0.85em !important;
-}
-
-/* Текст комментария */
-html body #comments-modal .comment-text {
-    font-size: 0.9em !important;
-    line-height: 1.4 !important;
+    font-size: 0.8em !important;
 }
 
 /* Форма ввода комментария */
@@ -932,4 +918,66 @@ html body #comments-modal .modal-close {
     .chatTyping {
         padding: 10px 12px !important;
     }
+}
+
+/* ===================================================================
+ГЛОБАЛЬНОЕ ПРАВИЛО: КВАДРАТНЫЙ ФОРМАТ ДЛЯ ВСЕХ КАРУСЕЛЕЙ
+=================================================================== */
+.carousel-container {
+    aspect-ratio: 1 / 1 !important;
+    overflow: hidden;
+}
+
+.carousel-slide img,
+.carousel-slide video {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+}
+
+/* Уменьшаем превью вложений на мобильных */
+@media (max-width: 767px) {
+    .attachments-preview {
+        gap: 6px;
+    }
+    .attachment-item {
+        width: 70px;
+        height: 70px;
+    }
+    .attachment-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    .video-info-card {
+        padding: 4px;
+        font-size: 0.7rem;
+    }
+    .video-info-card .video-icon {
+        font-size: 1.2rem;
+    }
+    .video-info-card .video-name {
+        font-size: 0.65rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .video-info-card .video-size {
+        font-size: 0.6rem;
+    }
+    .remove-attachment {
+        width: 16px;
+        height: 16px;
+        font-size: 10px;
+        top: -6px;
+        right: -6px;
+    }
+}
+
+/* Сохраняем колоночный список на странице чужого профиля */
+#section-friends .friends-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0 !important;
+    grid-template-columns: none !important; /* сброс grid-свойств */
 }

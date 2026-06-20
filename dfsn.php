@@ -35,6 +35,7 @@ define('DFSN_DATA_COLLECTION_ENABLED', true);
 define('DFSN_MODEL_DUMP_ENABLED', true);
 define('DFSN_DATASET_MAX_ROWS', 500000);
 define('DFSN_DUMP_RETENTION_DAYS', 7);
+define('GENDER_BOOST',         0.05);
 
 // ----------------------------------------------------------
 // 2. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -508,7 +509,7 @@ class DFSN {
 
     // ==================== ВЕКТОР ИНТЕРЕСОВ ====================
 
-    public function updateInterestVector(int $userId): void {
+    public function updateInterestVector(int $userId, array $extraWords = []): void {
         $this->guardValidUser($userId);
         $vector = array_fill(0, VECTOR_DIMENSION, 0.0);
         $posts = select("SELECT content FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 100", [$userId]);
@@ -519,16 +520,35 @@ class DFSN {
                 $vector[$idx] += 1.0;
             }
         }
+        // Добавляем слова из дополнительных источников (имена файлов, описания фото)
+        foreach ($extraWords as $word) {
+            $word = mb_strtolower(trim($word));
+            if ($word !== '') {
+                $idx = abs(crc32($word) % VECTOR_DIMENSION);
+                $vector[$idx] += 1.0;
+            }
+        }
         $norm = array_sum($vector) ?: 1;
         foreach ($vector as &$v) $v /= $norm;
 
         db()->prepare("INSERT INTO dfsn_interest_vectors (user_id, vector, updated_at) VALUES (?, ?, ?)
-                       ON DUPLICATE KEY UPDATE vector = VALUES(vector), updated_at = VALUES(updated_at)")
+                    ON DUPLICATE KEY UPDATE vector = VALUES(vector), updated_at = VALUES(updated_at)")
             ->execute([$userId, json_encode($vector), time()]);
 
         $this->collectSample(['interest_vector' => $vector], 'interest');
 
         $this->invalidateRecommendationCache($userId);
+    }
+
+    public function updateProfileVector(int $userId, array $profileFields): void
+    {
+        $words = [];
+        foreach ($profileFields as $value) {
+            if (is_string($value) && trim($value) !== '') {
+                $words = array_merge($words, tokenize($value));
+            }
+        }
+        $this->updateInterestVector($userId, $words);
     }
 
     public function getInterestVector(int $userId): array {
@@ -611,7 +631,7 @@ class DFSN {
 
         $posts = select("
             SELECT p.id, p.user_id, p.created_at, p.likes_count,
-                   COALESCE(pm.avg_read_time, 0) as avg_read_time
+                COALESCE(pm.avg_read_time, 0) as avg_read_time
             FROM posts p
             LEFT JOIN (
                 SELECT post_id, AVG(read_time) as avg_read_time FROM post_metrics GROUP BY post_id
@@ -626,6 +646,21 @@ class DFSN {
         $userVector = $this->getInterestVector($userId);
         $now = time();
 
+        // === ГЕНДЕРНЫЙ ФАКТОР ===
+        // Получаем пол текущего пользователя (один запрос)
+        $currentUserGender = scalar("SELECT gender FROM users WHERE id = ?", [$userId]) ?: null;
+        
+        // Получаем пол всех авторов постов (один bulk-запрос)
+        $genderMap = [];
+        if ($currentUserGender) {
+            $placeholders = implode(',', array_fill(0, count($authorIds), '?'));
+            $genders = select("SELECT id, gender FROM users WHERE id IN ($placeholders)", $authorIds);
+            foreach ($genders as $g) {
+                $genderMap[$g['id']] = $g['gender'];
+            }
+        }
+        // ===========================
+
         $results = [];
         foreach ($posts as $post) {
             $authorId = $post['user_id'];
@@ -635,6 +670,12 @@ class DFSN {
             $quality = sigmoid(($post['avg_read_time'] ?? 0) / 30 + log(1 + ($post['likes_count'] ?? 0)) - 2);
             $recency = exp(-($now - strtotime($post['created_at'])) / (7 * 86400));
             $score = ALPHA_TRUST * $trust + BETA_INTEREST * $interest + GAMMA_QUALITY * $quality * $authorWeights['w_expert'] + DELTA_RECENCY * $recency;
+
+            // Гендерный буст: +5%, если пола разные и пост уже качественный
+            if ($currentUserGender && isset($genderMap[$authorId]) && $genderMap[$authorId] !== $currentUserGender && $quality > 0.3) {
+                $score *= (1 + GENDER_BOOST);
+            }
+
             $results[] = ['post_id' => $post['id'], 'score' => round($score, 4)];
 
             if (DFSN_DATA_COLLECTION_ENABLED && count($results) <= 50) {

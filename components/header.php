@@ -1,6 +1,8 @@
 <?php
-// header.php — исправленная версия
+// header.php — упрощённая версия для гостей, полное меню для авторизованных
 require_once __DIR__ . '/../kopilot/kopilot_init.php';
+
+$isLoggedIn = is_logged_in();
 ?>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,600&display=swap');
@@ -9,127 +11,200 @@ require_once __DIR__ . '/../kopilot/kopilot_init.php';
 <?= csrf_field() ?>
 <div class="sidebar">
 <script src="/kopilot/js/kopilot.js"></script>
+<?php if ($_SERVER['HTTP_HOST'] === 'localhost' || $_SERVER['HTTP_HOST'] === '127.0.0.1'): ?>
 <script>kop.liveReload();</script>
+<?php endif; ?>
 <div class="header">
 <a href="feed.php" class="mainLogo">Friendscape</a>
 </div>
 <div class="Menu">
-<a href="profile.php">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-</svg>
-</span>
-Профиль
-</a>
-<a href="#" id="notifications-menu-link" style="position:relative;" onclick="event.preventDefault(); toggleNotificationsDropdown();">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-</svg>
-</span>
-Уведомления
-<span id="notifications-badge" style="position:absolute; top:2px; right:8px; background:#b91c1c; color:#fff; border-radius:50%; width:18px; height:18px; font-size:0.65em; display:none; align-items:center; justify-content:center;">0</span>
-</a>
-<a href="messenger.php" style="position:relative;">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-</svg>
-</span>
-Чаты
-<span id="chats-badge" style="position:absolute; top:2px; right:8px; background:#b91c1c; color:#fff; border-radius:50%; width:18px; height:18px; font-size:0.65em; display:none; align-items:center; justify-content:center;">0</span>
-</a>
-<a href="search.php">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-<circle cx="9" cy="7" r="4"/>
-<path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-<path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-</svg>
-</span>
-Люди
-</a>
-<a href="feed.php">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><path d="M17 2l-5 5-5-5"/>
-</svg>
-</span>
-Лента
-</a>
-<a href="settings.php">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-</svg>
-</span>
-Настройки
-</a>
+<?php if ($isLoggedIn): ?>
+    <!-- Полное меню для авторизованных -->
+    <a href="profile.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+        </span>
+        Профиль
+    </a>
+    <a href="#" id="notifications-menu-link" style="position:relative;" onclick="event.preventDefault(); toggleNotificationsDropdown();">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+        </span>
+        Уведомления
+        <span class="notif-badge" id="notifications-badge" style="position:absolute; top:2px; right:8px; background:#b91c1c; color:#fff; border-radius:50%; width:18px; height:18px; font-size:0.65em; display:none; align-items:center; justify-content:center;">0</span>
+    </a>
+    <a href="messenger.php" style="position:relative;">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+            </svg>
+        </span>
+        Чаты
+        <span class="chats-badge" id="chats-badge" style="position:absolute; top:2px; right:8px; background:#b91c1c; color:#fff; border-radius:50%; width:18px; height:18px; font-size:0.65em; display:none; align-items:center; justify-content:center;">0</span>
+    </a>
+    <a href="search.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+        </span>
+        Люди
+    </a>
+    <a href="feed.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><path d="M17 2l-5 5-5-5"/>
+            </svg>
+        </span>
+        Лента
+    </a>
+    <a href="settings.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+        </span>
+        Настройки
+    </a>
+    <a href="logout.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #b91c1c;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+        </span>
+        Выйти
+    </a>
+<?php else: ?>
+    <!-- Гостевое меню: только Лента и Войти -->
+    <a href="feed.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><path d="M17 2l-5 5-5-5"/>
+            </svg>
+        </span>
+        Лента
+    </a>
+    <a href="login.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #10b981;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                <polyline points="10 17 15 12 10 7"/>
+                <line x1="15" y1="12" x2="3" y2="12"/>
+            </svg>
+        </span>
+        Войти
+    </a>
+<?php endif; ?>
 </div>
-<!-- Dropdown ВНУТРИ sidebar для правильного позиционирования -->
+<!-- Dropdown для уведомлений (только для авторизованных) -->
+<?php if ($isLoggedIn): ?>
 <div id="notifications-dropdown" style="position:absolute; top:0; left:260px; width:340px; background:#fff; border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,0.12); display:none; z-index:10000; max-height:400px; overflow-y:auto; padding:10px;"></div>
+<?php endif; ?>
 <div id="global-toast" class="global-toast"></div>
 </div>
 
-<!-- Мобильное меню (6 кнопок) -->
+<!-- Мобильное меню -->
 <nav class="mobile-nav mobile-only">
-<a href="profile.php">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-</svg>
-</span>
-<span class="mobile-nav-label">Профиль</span>
-</a>
-<a href="notifications.php">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-</svg>
-</span>
-<span class="mobile-nav-label">Уведомления</span>
-</a>
-<a href="messenger.php">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-</svg>
-</span>
-<span class="mobile-nav-label">Чаты</span>
-</a>
-<a href="search.php">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-<circle cx="9" cy="7" r="4"/>
-<path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-<path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-</svg>
-</span>
-<span class="mobile-nav-label">Люди</span>
-</a>
-<a href="feed.php">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><path d="M17 2l-5 5-5-5"/>
-</svg>
-</span>
-<span class="mobile-nav-label">Лента</span>
-</a>
-<a href="settings.php">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-</svg>
-</span>
-<span class="mobile-nav-label">Настройки</span>
-</a>
+<?php if ($isLoggedIn): ?>
+    <a href="profile.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+        </span>
+        <span class="mobile-nav-label">Профиль</span>
+    </a>
+    <a href="notifications.php" style="position: relative;">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+        </span>
+        <span class="mobile-nav-label">Уведомления</span>
+        <span class="notif-badge" id="mobile-notifications-badge" style="position:absolute; top:2px; right:8px; background:#b91c1c; color:#fff; border-radius:50%; width:18px; height:18px; font-size:0.65em; display:none; align-items:center; justify-content:center;">0</span>
+    </a>
+    <a href="messenger.php" style="position: relative;">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+            </svg>
+        </span>
+        <span class="mobile-nav-label">Чаты</span>
+        <span class="chats-badge" id="mobile-chats-badge" style="position:absolute; top:2px; right:8px; background:#b91c1c; color:#fff; border-radius:50%; width:18px; height:18px; font-size:0.65em; display:none; align-items:center; justify-content:center;">0</span>
+    </a>
+    <a href="search.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+        </span>
+        <span class="mobile-nav-label">Люди</span>
+    </a>
+    <a href="feed.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><path d="M17 2l-5 5-5-5"/>
+            </svg>
+        </span>
+        <span class="mobile-nav-label">Лента</span>
+    </a>
+    <a href="settings.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+        </span>
+        <span class="mobile-nav-label">Настройки</span>
+    </a>
+<?php else: ?>
+    <a href="feed.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/><path d="M17 2l-5 5-5-5"/>
+            </svg>
+        </span>
+        <span class="mobile-nav-label">Лента</span>
+    </a>
+    <a href="login.php">
+        <span class="Menu__icon" style="background: #f0f0f0; color: #10b981;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                <polyline points="10 17 15 12 10 7"/>
+                <line x1="15" y1="12" x2="3" y2="12"/>
+            </svg>
+        </span>
+        <span class="mobile-nav-label">Войти</span>
+    </a>
+<?php endif; ?>
 </nav>
 
 <script>
 window.csrfToken = document.querySelector('input[name="_csrf"]')?.value;
+
+// Глобальный перехват 401 для гостей
+const originalFetch = window.fetch;
+window.fetch = function(...args) {
+    return originalFetch.apply(this, args).then(response => {
+        if (response.status === 401) {
+            response.clone().json().then(data => {
+                window.location.href = data.redirect || '/login.php';
+            }).catch(() => {
+                window.location.href = '/login.php';
+            });
+        }
+        return response;
+    });
+};
 
 // Базовая функция обновления бейджа
 window.updateBadge = function(badgeEl, count) {
@@ -142,18 +217,15 @@ window.updateBadge = function(badgeEl, count) {
     }
 };
 
-// Глобальные переменные для счётчиков
 window.currentNotifUnread = 0;
 window.currentChatsUnread = 0;
 
+<?php if ($isLoggedIn): ?>
 (function() {
 const menuLink = document.getElementById('notifications-menu-link');
 const dropdown = document.getElementById('notifications-dropdown');
-const notifBadge = document.getElementById('notifications-badge');
-const chatsBadge = document.getElementById('chats-badge');
 let unreadCount = 0;
 
-// Загрузка счётчика уведомлений
 async function loadNotifications() {
     try {
         const res = await fetch('/api/notifications?unread=1', {
@@ -163,11 +235,13 @@ async function loadNotifications() {
         const data = await res.json();
         unreadCount = data.unread_count || 0;
         window.currentNotifUnread = unreadCount;
-        window.updateBadge(notifBadge, unreadCount);
+        // Обновляем все бейджи уведомлений
+        document.querySelectorAll('.notif-badge').forEach(badge => {
+            window.updateBadge(badge, unreadCount);
+        });
     } catch(e) {}
 }
 
-// Загрузка счётчика чатов
 async function loadChatsBadge() {
     try {
         const res = await fetch('/api/chats', {
@@ -178,7 +252,10 @@ async function loadChatsBadge() {
         const chats = data.chats || [];
         const totalUnread = chats.reduce((sum, c) => sum + (parseInt(c.unread_count) || 0), 0);
         window.currentChatsUnread = totalUnread;
-        window.updateBadge(chatsBadge, totalUnread);
+        // Обновляем все бейджи чатов
+        document.querySelectorAll('.chats-badge').forEach(badge => {
+            window.updateBadge(badge, totalUnread);
+        });
     } catch(e) {}
 }
 
@@ -504,7 +581,9 @@ method: 'POST',
 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken || '' },
 body: JSON.stringify({ ids: unreadIds })
 }).then(() => {
-window.updateBadge(notifBadge, 0);
+document.querySelectorAll('.notif-badge').forEach(badge => {
+window.updateBadge(badge, 0);
+});
 window.currentNotifUnread = 0;
 });
 }
@@ -539,26 +618,27 @@ window.updateHeaderUnread = function(options) {
     loadChatsBadge();
 };
 })();
+<?php endif; ?>
 
 // Глобальная функция форматирования счётчиков
 window.formatCount = function(count) {
-count = parseInt(count) || 0;
-if (count < 1000) {
-return count.toString();
-} else if (count < 1000000) {
-const thousands = count / 1000;
-if (thousands === Math.floor(thousands)) {
-return thousands + 'К';
-} else {
-return thousands.toFixed(1) + 'К';
-}
-} else {
-const millions = count / 1000000;
-if (millions === Math.floor(millions)) {
-return millions + 'М';
-} else {
-return millions.toFixed(1) + 'М';
-}
-}
+    count = parseInt(count) || 0;
+    if (count < 1000) {
+        return count.toString();
+    } else if (count < 1000000) {
+        const thousands = count / 1000;
+        if (thousands === Math.floor(thousands)) {
+            return thousands + 'К';
+        } else {
+            return thousands.toFixed(1) + 'К';
+        }
+    } else {
+        const millions = count / 1000000;
+        if (millions === Math.floor(millions)) {
+            return millions + 'М';
+        } else {
+            return millions.toFixed(1) + 'М';
+        }
+    }
 };
 </script>

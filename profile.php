@@ -6,7 +6,8 @@ if (!$user) {
     echo '<p>Пользователь не найден</p>';
     exit;
 }
-db()->prepare("UPDATE users SET last_active = NOW() WHERE id = ?")->execute([$_SESSION['user_id']]);
+
+$currentUserId = (int)$_SESSION['user_id'];
 
 // Является ли владелец профиля «Первопроходцем» (первые 1000 пользователей)
 $isPioneer = ($user['id'] ?? 0) <= 1000;
@@ -25,16 +26,17 @@ if ($user['last_active']) {
 
 // --- ПОЛУЧЕНИЕ ПОСТОВ С МЕДИАФАЙЛАМИ ---
 $stmt = db()->prepare("
-    SELECT p.*,
+    SELECT p.*, u.first_name, u.last_name, u.avatar,
            (SELECT GROUP_CONCAT(CONCAT(pm.id, '|', pm.file_url, '|', pm.media_type) SEPARATOR ',')
             FROM post_media pm
             WHERE pm.post_id = p.id) AS media_list
     FROM posts p
+    JOIN users u ON u.id = p.user_id
     WHERE p.user_id = ?
     ORDER BY p.created_at DESC
     LIMIT 10
 ");
-$stmt->execute([$_SESSION['user_id']]);
+$stmt->execute([$currentUserId]);
 $posts = $stmt->fetchAll();
 
 foreach ($posts as &$post) {
@@ -49,16 +51,21 @@ foreach ($posts as &$post) {
         $oldType = preg_match('/\.(mp4|webm|mov)$/i', $post['image']) ? 'video' : 'image';
         $post['media'][] = ['id' => 0, 'url' => $post['image'], 'type' => $oldType];
     }
-    unset($post['media_list']);
-    unset($post['image']);
+    unset($post['media_list'], $post['image']);
+
+    $stmt2 = db()->prepare("SELECT reaction FROM post_reactions WHERE post_id = ? AND user_id = ?");
+    $stmt2->execute([$post['id'], $currentUserId]);
+    $react = $stmt2->fetch();
+    $post['user_reaction'] = $react ? $react['reaction'] : null;
 }
+unset($post);
 
 $friends = select(
     "SELECT u.id, u.first_name, u.last_name, u.avatar, f.requester_id
      FROM friendships f
      JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
      WHERE (f.requester_id = ? OR f.addressee_id = ?) AND f.status = 'accepted'",
-    [$_SESSION['user_id'], $_SESSION['user_id'], $_SESSION['user_id']]
+    [$currentUserId, $currentUserId, $currentUserId]
 );
 
 $pageTitle = esc($user['first_name'] . ' ' . $user['last_name']) . ' - Friendscape';
@@ -67,38 +74,6 @@ function declension($number, $titles) {
     $cases = [2, 0, 1, 1, 1, 2];
     return $titles[($number % 100 > 4 && $number % 100 < 20) ? 2 : $cases[($number % 10 < 5) ? $number % 10 : 5]];
 }
-
-/**
- * Преобразует хештеги в тексте в кликабельные ссылки.
- */
-function renderHashtags(string $text): string {
-    $escaped = esc($text);
-    return preg_replace(
-        '/#([\w\p{L}]+)/u',
-        '<a href="search.php?q=%23$1" class="hashtag-link">#$1</a>',
-        $escaped
-    );
-}
-
-/**
- * Возвращает человекочитаемую строку "когда" был создан пост.
- */
-function timeAgo(string $datetime): string {
-    $time = strtotime($datetime);
-    if (!$time) return '';
-    $diff = time() - $time;
-
-    if ($diff < 60)       return 'только что';
-    if ($diff < 3600)     return floor($diff / 60) . ' мин. назад';
-    if ($diff < 86400)    return floor($diff / 3600) . ' ч. назад';
-    if ($diff < 172800)   return 'вчера';
-    if ($diff < 604800)   return floor($diff / 86400) . ' дн. назад';
-
-    // Старые посты — показываем дату
-    $months = ['янв.', 'фев.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сен.', 'окт.', 'ноя.', 'дек.'];
-    return date('j', $time) . ' ' . $months[(int)date('n', $time) - 1] . ' ' . date('Y', $time);
-}
-
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -108,147 +83,160 @@ function timeAgo(string $datetime): string {
     <title><?= $pageTitle ?></title>
     <link rel="stylesheet" href="css/main.css">
     <style>
+        .hashtag-link {
+            color: #3b5dd3;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        .hashtag-link:hover {
+            text-decoration: underline;
+        }
+        .post-time {
+            font-size: 0.85em;
+            color: #8b8fa3;
+            font-weight: 400;
+            margin-left: 6px;
+            white-space: nowrap;
+        }
+        .post-time::before {
+            content: "·";
+            margin-right: 6px;
+            color: #c5c9d6;
+        }
 
-.hashtag-link {
-color: #3b5dd3;
-text-decoration: none;
-font-weight: 500;
-}
-.hashtag-link:hover {
-text-decoration: underline;
-}
-.post-time {
-font-size: 0.85em;
-color: #8b8fa3;
-font-weight: 400;
-margin-left: 6px;
-white-space: nowrap;
-}
-.post-time::before {
-content: "·";
-margin-right: 6px;
-color: #c5c9d6;
-}
+        /* Ограничение высоты модального окна комментариев */
+        html body #comments-modal .modal-container {
+            max-width: 480px !important;
+            width: auto !important;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        html body .comment-text {
+            font-size: 1em !important;
+        }
+        html body #comments-modal .comments-list {
+            max-height: 40vh !important;
+            overflow-y: auto !important;
+            margin-bottom: 12px !important;
+        }
+        html body #comments-modal .comment-form {
+            padding: 8px 0 0 !important;
+        }
 
-/* Карусель постов — квадрат с cover */
-.carousel-container {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    overflow: hidden;
-    background: #000;
-    border-radius: 0;
-}
+        /* Карусель постов — квадрат с cover */
+        .carousel-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            overflow: hidden;
+            border-radius: 0;
+        }
+        .carousel-track {
+            display: flex;
+            transition: transform 0.3s ease;
+            width: 100%;
+            height: 100%;
+        }
+        .carousel-slide {
+            flex: 0 0 100%;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .carousel-slide img,
+        .carousel-slide video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            cursor: pointer;
+            display: block;
+        }
 
-.carousel-track {
-    display: flex;
-    transition: transform 0.3s ease;
-    width: 100%;
-    height: 100%;
-}
+        /* Модальный просмотрщик — оригинальное соотношение */
+        .media-fullscreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0);
+            z-index: 10001;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+        .media-fullscreen.visible {
+            background: rgba(0, 0, 0, 0.95);
+        }
+        .media-fullscreen .media-content {
+            max-width: 90vw;
+            max-height: 90vh;
+            object-fit: contain;
+            opacity: 0;
+            transform: scale(0.9);
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        .media-fullscreen.visible .media-content {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .media-fullscreen .close-btn {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            font-size: 40px;
+            color: #fff;
+            cursor: pointer;
+            font-family: sans-serif;
+            z-index: 10002;
+            opacity: 0;
+            transition: opacity 0.2s ease 0.1s;
+        }
+        .media-fullscreen.visible .close-btn {
+            opacity: 1;
+        }
 
-.carousel-slide {
-    flex: 0 0 100%;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-}
+        /* ===== МОБИЛЬНЫЕ ИСПРАВЛЕНИЯ ===== */
+        @media (max-width: 767px) {
+            .mainArea {
+                margin-left: 0 !important;
+                padding: 10px !important;
+            }
+            .profileCard {
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            .post {
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+        }
 
-.carousel-slide img,
-.carousel-slide video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    cursor: pointer;
-    display: block;
-}
-
-/* Модальный просмотрщик — оригинальное соотношение */
-.media-fullscreen {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0);
-    z-index: 10001;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background 0.3s ease;
-}
-
-.media-fullscreen.visible {
-    background: rgba(0, 0, 0, 0.95);
-}
-
-.media-fullscreen .media-content {
-    max-width: 90vw;
-    max-height: 90vh;
-    object-fit: contain;
-    opacity: 0;
-    transform: scale(0.9);
-    transition: opacity 0.3s ease, transform 0.3s ease;
-}
-
-.media-fullscreen.visible .media-content {
-    opacity: 1;
-    transform: scale(1);
-}
-
-.media-fullscreen .close-btn {
-    position: absolute;
-    top: 20px;
-    right: 30px;
-    font-size: 40px;
-    color: #fff;
-    cursor: pointer;
-    font-family: sans-serif;
-    z-index: 10002;
-    opacity: 0;
-    transition: opacity 0.2s ease 0.1s;
-}
-
-.media-fullscreen.visible .close-btn {
-    opacity: 1;
-}
-
-/* ===== МОБИЛЬНЫЕ ИСПРАВЛЕНИЯ ===== */
-@media (max-width: 767px) {
-    .mainArea {
-        margin-left: 0 !important;
-        padding: 10px !important;
-    }
-    
-    .profileCard {
-        width: 100% !important;
-        max-width: 100% !important;
-    }
-    
-    .post {
-        width: 100% !important;
-        max-width: 100% !important;
-    }
-    
-    .carousel-container {
-        aspect-ratio: auto !important;
-    }
-    
-    .carousel-slide img,
-    .carousel-slide video {
-        height: auto !important;
-        object-fit: contain !important;
-    }
-}
+        .profile-status-container {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .pioneer-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            margin-right: 6px;
+            color: #f59e0b;
+            flex-shrink: 0;
+            cursor: help;
+        }
     </style>
 </head>
 <body>
 <script>
-// Заглушки для функций и переменных, которые ожидаются в header.php
 window.updateBadge = window.updateBadge || function(badgeEl, count) {
     if (!badgeEl) return;
     if (count > 0) {
@@ -265,47 +253,48 @@ window.currentChatsUnread = 0;
     <div class="mainArea">
         <div class="profileContainer">
             <!-- Карточка профиля -->
-<div class="profileCard">
-    <div class="profileAvatar">
-        <?php if (!empty($user['avatar'])): ?>
-            <img src="<?= esc($user['avatar']) ?>" alt="">
-        <?php else: ?>
-            <span class="accountAvatarPlaceholder"><?= esc(mb_substr($user['first_name'], 0, 1) . mb_substr($user['last_name'], 0, 1)) ?></span>
-        <?php endif; ?>
-    </div>
-    <div class="profileCardInfo">
-        <div class="profileName">
-            <span class="profileNameText"><?= esc($user['first_name'] . ' ' . $user['last_name']) ?></span>
-            <span class="profile-status-container">
-                <?php if ($isPioneer): ?>
-                    <span class="pioneer-badge" title="Значок «Первопроходец». Уникальная награда для первой тысячи пользователей Friendscape">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12 13c-2 0-3.5 1.5-3.5 3.5v1.5c0 2 1.5 3.5 3.5 3.5s3.5-1.5 3.5-3.5v-1.5c0-2-1.5-3.5-3.5-3.5z"/>
-                            <path d="M6.5 9c-1.5 0-2.5 1-2.5 2.5v1c0 1.5 1 2.5 2.5 2.5s2.5-1 2.5-2.5v-1c0-1.5-1-2.5-2.5-2.5z"/>
-                            <path d="M17.5 9c-1.5 0-2.5 1-2.5 2.5v1c0 1.5 1 2.5 2.5 2.5s2.5-1 2.5-2.5v-1c0-1.5-1-2.5-2.5-2.5z"/>
-                            <path d="M3 14.5c-1 0-1.8.8-1.8 1.8v1c0 1 .8 1.8 1.8 1.8s1.8-.8 1.8-1.8v-1c0-1-.8-1.8-1.8-1.8z"/>
-                            <path d="M21 14.5c-1 0-1.8.8-1.8 1.8v1c0 1 .8 1.8 1.8 1.8s1.8-.8 1.8-1.8v-1c0-1-.8-1.8-1.8-1.8z"/>
-                        </svg>
-                    </span>
-                <?php endif; ?>
-                <span class="profileStatus"><?= $onlineStatus ?></span>
-            </span>
-            <button class="btn btn--more" id="toggle-bio-btn" onclick="toggleBio()">Больше</button>
-        </div>
+            <div class="profileCard">
+                <div class="profileAvatar">
+                    <?php if (!empty($user['avatar'])): ?>
+                        <img src="<?= esc($user['avatar']) ?>" alt="">
+                    <?php else: ?>
+                        <span class="accountAvatarPlaceholder"><?= esc(mb_substr($user['first_name'], 0, 1) . mb_substr($user['last_name'], 0, 1)) ?></span>
+                    <?php endif; ?>
+                </div>
+                <div class="profileCardInfo">
+                    <div class="profileName">
+                        <span class="profileNameText"><?= esc($user['first_name'] . ' ' . $user['last_name']) ?></span>
+                        <span class="profile-status-container">
+                            <?php if ($isPioneer): ?>
+                                <span class="pioneer-badge" title="Значок «Первопроходец». Уникальная награда для первой тысячи пользователей Friendscape">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <ellipse cx="6" cy="9" rx="2.5" ry="3" transform="rotate(-15 6 9)"/>
+                                        <ellipse cx="12" cy="7" rx="2.5" ry="3"/>
+                                        <ellipse cx="18" cy="9" rx="2.5" ry="3" transform="rotate(15 18 9)"/>
+                                        <ellipse cx="4" cy="14" rx="2" ry="2.5" transform="rotate(-30 4 14)"/>
+                                        <ellipse cx="20" cy="14" rx="2" ry="2.5" transform="rotate(30 20 14)"/>
+                                        <path d="M12 13c-3 0-5 2-5 5s2 5 5 5 5-2 5-5-2-5-5-5z"/>
+                                    </svg>
+                                </span>
+                            <?php endif; ?>
+                            <span class="profileStatus"><?= $onlineStatus ?></span>
+                        </span>
+                        <button class="btn btn--more" id="toggle-bio-btn" onclick="toggleBio()">Больше</button>
+                    </div>
 
-        <div class="bio-wrapper" id="bio-wrapper">
-            <div class="bio">
-                <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="bioLabel">О себе:</span><span class="bioValue"><?= esc($user['about'] ?? '') ?></span></div>
-                <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2c-3.3 0-6 2.7-6 6 0 5 6 12 6 12s6-7 6-12c0-3.3-2.7-6-6-6z"/><circle cx="12" cy="8" r="2"/></svg></span><span class="bioLabel">Город:</span><span class="bioValue"><?= esc($user['city'] ?? '') ?></span></div>
-                <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span><span class="bioLabel">Статус отношений:</span><span class="bioValue"><?= esc($user['relationship'] ?? '') ?></span></div>
-                <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></span><span class="bioLabel">Интересы:</span><span class="bioValue"><?= esc($user['interests'] ?? '') ?></span></div>
-                <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg></span><span class="bioLabel">Мне не нравится:</span><span class="bioValue"><?= esc($user['dislikes'] ?? '') ?></span></div>
+                    <div class="bio-wrapper" id="bio-wrapper">
+                        <div class="bio">
+                            <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="bioLabel">О себе:</span><span class="bioValue"><?= esc($user['about'] ?? '') ?></span></div>
+                            <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2c-3.3 0-6 2.7-6 6 0 5 6 12 6 12s6-7 6-12c0-3.3-2.7-6-6-6z"/><circle cx="12" cy="8" r="2"/></svg></span><span class="bioLabel">Город:</span><span class="bioValue"><?= esc($user['city'] ?? '') ?></span></div>
+                            <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></span><span class="bioLabel">Статус отношений:</span><span class="bioValue"><?= esc($user['relationship'] ?? '') ?></span></div>
+                            <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg></span><span class="bioLabel">Интересы:</span><span class="bioValue"><?= esc($user['interests'] ?? '') ?></span></div>
+                            <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg></span><span class="bioLabel">Мне не нравится:</span><span class="bioValue"><?= esc($user['dislikes'] ?? '') ?></span></div>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </div>
-    </div>
-</div>
 
-            <!-- БЛОК ПОСТИНГА (с поддержкой множественных файлов) -->
+            <!-- БЛОК ПОСТИНГА -->
             <div class="postingSection">
                 <div class="postingRow">
                     <button class="profilePinButton" id="attach-btn" type="button">
@@ -342,91 +331,43 @@ window.currentChatsUnread = 0;
                     </div>
                 <?php else: ?>
                     <?php foreach ($posts as $post): ?>
-                        <div class="post" data-post-id="<?= $post['id'] ?>" data-author-id="<?= $post['user_id'] ?>">
-                            <div class="postHeader">
-                                <img class="opPicture" src="<?= esc($user['avatar'] ?? '') ?>" alt="">
-                            <div class="opLabel">
-                                <a href=""><?= esc($user['first_name'] . ' ' . $user['last_name']) ?></a>
-                                <span class="post-time"><?= timeAgo($post['created_at']) ?></span>
-                            </div>
-                                <div class="postOptions"><button><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></div>
-                            </div>
-                            <div class="postBody">
-                                <?php if (!empty($post['media'])): ?>
-                                    <div class="carousel-container">
-                                        <div class="carousel-track">
-                                            <?php foreach ($post['media'] as $media): ?>
-                                                <div class="carousel-slide">
-                                                    <?php if ($media['type'] === 'video'): ?>
-                                                        <video controls src="<?= esc($media['url']) ?>" preload="metadata"></video>
-                                                    <?php else: ?>
-                                                        <img src="<?= esc($media['url']) ?>" alt="">
-                                                    <?php endif; ?>
-                                                </div>
-                                            <?php endforeach; ?>
-                                        </div>
-                                        <?php if (count($post['media']) > 1): ?>
-                                            <button class="carousel-prev">
-                                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <polyline points="15 18 9 12 15 6"/>
-                                                </svg>
-                                            </button>
-                                            <button class="carousel-next">
-                                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                    <polyline points="9 18 15 12 9 6"/>
-                                                </svg>
-                                            </button>
-                                            <div class="carousel-dots"></div>
-                                        <?php endif; ?>
-                                    </div>
-                                <?php endif; ?>
-                                <?php if (!empty($post['content'])): ?>
-                                    <div class="postBodyText"><?= renderHashtags($post['content']) ?></div>
-                                <?php endif; ?>
-                            </div>
-                            <div class="postFooter">
-                                <div class="postReactions">
-                                    <button class="likeButton" data-post-id="<?= $post['id'] ?>">
-                                        <span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;">
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                                            </svg>
-                                        </span>
-                                    </button>
-                                    <p class="positiveCounter"><?= formatCount($post['likes_count']) ?></p>
-                                    <button class="dislikeButton" data-post-id="<?= $post['id'] ?>">
-                                        <span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;">
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <line x1="5" y1="12" x2="19" y2="12"/>
-                                            </svg>
-                                        </span>
-                                    </button>
-                                    <p class="negativeCounter"><?= formatCount($post['dislikes_count']) ?></p>
-                                </div>
-                                <button class="postCommentButton commentSheet" data-post-id="<?= $post['id'] ?>">
-                                    <span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;">
-                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-                                        </svg>
-                                    </span>
-                                </button>
-                                <div class="postActions">
-                                    <button class="sharePost" data-post-id="<?= $post['id'] ?>">
-                                        <span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;">
-                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
-                                                <path d="M8.59 13.51l6.83 3.98"/><path d="M15.41 6.51l-6.82 3.98"/>
-                                            </svg>
-                                        </span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+                        <?php include __DIR__ . '/components/post.php'; ?>
                     <?php endforeach; ?>
                 <?php endif; ?>
             </div>
 
-            <div class="facebookSection" style="display:none;"><div class="facebookLabel"><p>Мои фото</p><button id="upload-photo-btn" class="btn btn--primary" style="margin-left:16px;">+ Загрузить</button><input type="file" id="photo-file-input" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none;"></div><div id="photos-grid" class="facebook"></div></div>
+            <div id="section-friends" style="display:none;">
+                <div class="friends-header">
+                    <h3 style="margin:0; font-size:1.2em;">Мои друзья</h3>
+                    <span class="friends-count"><?= count($friends) ?> <?= declension(count($friends), ['друг', 'друга', 'друзей']) ?></span>
+                </div>
+                <?php if (empty($friends)): ?>
+                    <div style="text-align:center;padding:40px 20px;"><p style="color:#8b8fa3;">Нет друзей</p></div>
+                <?php else: ?>
+                    <div class="friends-grid" id="friends-grid">
+                        <?php foreach ($friends as $friend): ?>
+                            <div class="friend-card" data-friend-id="<?= $friend['id'] ?>" data-requester-id="<?= $friend['requester_id'] ?>">
+                                <?php if (!empty($friend['avatar'])): ?>
+                                    <img class="friend-avatar" src="<?= esc($friend['avatar']) ?>" alt="">
+                                <?php else: ?>
+                                    <div class="friend-avatar-placeholder"><?= esc(mb_substr($friend['first_name']??'',0,1).mb_substr($friend['last_name']??'',0,1)) ?></div>
+                                <?php endif; ?>
+                                <div class="friend-info">
+                                    <a href="user.php?id=<?= $friend['id'] ?>" class="friend-name"><?= esc($friend['first_name'].' '.$friend['last_name']) ?></a>
+                                </div>
+                                <button class="remove-friend-btn" title="Удалить из друзей">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                </button>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+
+            <div class="facebookSection" style="display:none;">
+                <div class="facebookLabel"><p>Мои фото</p><button id="upload-photo-btn" class="btn btn--primary" style="margin-left:16px;">+ Загрузить</button><input type="file" id="photo-file-input" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none;"></div>
+                <div id="photos-grid" class="facebook"></div>
+            </div>
 
             <!-- Личная информация -->
             <div class="personalInfoSection" style="display:none;">
@@ -468,35 +409,6 @@ window.currentChatsUnread = 0;
                     </div>
                 </div>
             </div>
-
-            <!-- Вкладка Друзья -->
-            <div id="section-friends" style="display:none;">
-                <div class="friends-header">
-                    <h3 style="margin:0; font-size:1.2em;">Мои друзья</h3>
-                    <span class="friends-count"><?= count($friends) ?> <?= declension(count($friends), ['друг', 'друга', 'друзей']) ?></span>
-                </div>
-                <?php if (empty($friends)): ?>
-                    <div style="text-align:center;padding:40px 20px;"><p style="color:#8b8fa3;">Нет друзей</p></div>
-                <?php else: ?>
-                    <div class="friends-grid" id="friends-grid">
-                        <?php foreach ($friends as $friend): ?>
-                            <div class="friend-card" data-friend-id="<?= $friend['id'] ?>" data-requester-id="<?= $friend['requester_id'] ?>">
-                                <?php if (!empty($friend['avatar'])): ?>
-                                    <img class="friend-avatar" src="<?= esc($friend['avatar']) ?>" alt="">
-                                <?php else: ?>
-                                    <div class="friend-avatar-placeholder"><?= esc(mb_substr($friend['first_name']??'',0,1).mb_substr($friend['last_name']??'',0,1)) ?></div>
-                                <?php endif; ?>
-                                <div class="friend-info">
-                                    <a href="user.php?id=<?= $friend['id'] ?>" class="friend-name"><?= esc($friend['first_name'].' '.$friend['last_name']) ?></a>
-                                </div>
-                                <button class="remove-friend-btn" title="Удалить из друзей">
-                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                </button>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
-            </div>
         </div>
     </div>
 
@@ -527,16 +439,7 @@ window.currentChatsUnread = 0;
     </div>
 
 <script>
-// ---------- Глобальная функция экранирования ----------
-function esc(str) {
-    if (str == null) return '';
-    return String(str).replace(/[&<>]/g, function(m) {
-        if (m === '&') return '&amp;';
-        if (m === '<') return '&lt;';
-        if (m === '>') return '&gt;';
-        return m;
-    });
-}
+// ---------- Глобальная функция экранирования (удалена, используется kop.esc) ----------
 
 // ---------- Функция для переключения био ----------
 function toggleBio() {
@@ -554,7 +457,7 @@ function toggleBio() {
 // ---------- Функция для рендеринга хештегов в клиентском JS ----------
 function renderHashtagsInText(text) {
     if (!text) return '';
-    const escaped = esc(text);
+    const escaped = kop.esc(text);
     return escaped.replace(/#([\w\p{L}]+)/gu, '<a href="search.php?q=%23$1" class="hashtag-link">#$1</a>');
 }
 
@@ -580,8 +483,8 @@ function showConfirm(title, message, onConfirm, onCancel) {
     overlay.innerHTML = `
         <div class="modal-container" style="max-width:400px; padding:20px;">
             <span class="modal-close" style="float:right; cursor:pointer;">&times;</span>
-            <h3 style="margin-top:0;">${esc(title)}</h3>
-            <p>${esc(message)}</p>
+            <h3 style="margin-top:0;">${kop.esc(title)}</h3>
+            <p>${kop.esc(message)}</p>
             <div style="display:flex; gap:12px; justify-content:flex-end; margin-top:20px;">
                 <button class="btn btn--secondary" id="confirm-cancel">Отмена</button>
                 <button class="btn btn--danger" id="confirm-ok">Удалить</button>
@@ -622,13 +525,12 @@ function hidePostMenu() {
     currentOpenMenuPostId = null;
 }
 document.addEventListener('click', (e) => {
-    // Если клик не по меню и не по кнопке троеточия — закрываем меню
     if (!postMenu.contains(e.target) && !e.target.closest('.postOptions button')) {
         hidePostMenu();
     }
 });
 
-function openImageViewer(url) { const viewer = document.createElement('div'); viewer.className = 'image-viewer'; viewer.innerHTML = `<img src="${url}" alt="">`; viewer.addEventListener('click', () => viewer.remove()); document.body.appendChild(viewer); }
+function openImageViewer(url) { const viewer = document.createElement('div'); viewer.className = 'image-viewer'; viewer.innerHTML = `<img src="${kop.esc(url)}" alt="">`; viewer.addEventListener('click', () => viewer.remove()); document.body.appendChild(viewer); }
 
 // ---------- ПОЛНОЭКРАННЫЙ ПРОСМОТР ОРИГИНАЛА ----------
 function openFullMedia(src, type) {
@@ -668,9 +570,7 @@ function openFullMedia(src, type) {
 }
 
 // ---------- ПРИВЯЗКА КЛИКОВ НА МЕДИА В КАРУСЕЛИ ----------
-// ---------- ПРИВЯЗКА КЛИКОВ НА МЕДИА В КАРУСЕЛИ И ОДИНОЧНЫХ ИЗОБРАЖЕНИЯХ ----------
 function bindMediaClicks() {
-    // Обработчики для картинок в каруселях
     document.querySelectorAll('.carousel-slide img').forEach(img => {
         if (!img.dataset.clickBound) {
             img.dataset.clickBound = '1';
@@ -680,8 +580,6 @@ function bindMediaClicks() {
             });
         }
     });
-    
-    // Обработчики для видео в каруселях
     document.querySelectorAll('.carousel-slide video').forEach(video => {
         if (!video.dataset.clickBound) {
             video.dataset.clickBound = '1';
@@ -691,8 +589,6 @@ function bindMediaClicks() {
             });
         }
     });
-    
-    // Обработчики для одиночных изображений в постах (не в каруселях)
     document.querySelectorAll('.postBodyImage').forEach(img => {
         if (!img.dataset.clickBound) {
             img.dataset.clickBound = '1';
@@ -701,99 +597,6 @@ function bindMediaClicks() {
                 openFullMedia(img.src, 'image');
             });
         }
-    });
-}
-
-// ---------- ИНИЦИАЛИЗАЦИЯ КАРУСЕЛИ ----------
-function initCarousel(container) {
-    const track = container.querySelector('.carousel-track');
-    const slides = track ? Array.from(track.children) : [];
-    if (slides.length <= 1) return;
-    const prevBtn = container.querySelector('.carousel-prev');
-    const nextBtn = container.querySelector('.carousel-next');
-    const dotsNav = container.querySelector('.carousel-dots');
-    let currentIndex = 0;
-
-    function updateCarouselTransform() {
-        const slideWidth = slides[0].getBoundingClientRect().width;
-        track.style.transform = 'translateX(-' + (currentIndex * slideWidth) + 'px)';
-        if (dotsNav) {
-            Array.from(dotsNav.children).forEach((dot, i) => {
-                dot.classList.toggle('active', i === currentIndex);
-            });
-        }
-    }
-    function goToSlide(index) {
-        if (index < 0) index = 0;
-        if (index >= slides.length) index = slides.length - 1;
-        if (index === currentIndex) return;
-        currentIndex = index;
-        updateCarouselTransform();
-    }
-    if (prevBtn) prevBtn.addEventListener('click', () => goToSlide(currentIndex - 1));
-    if (nextBtn) nextBtn.addEventListener('click', () => goToSlide(currentIndex + 1));
-
-    let touchStartX = 0;
-    container.addEventListener('touchstart', (e) => {
-        touchStartX = e.changedTouches[0].screenX;
-    });
-    container.addEventListener('touchend', (e) => {
-        const touchEndX = e.changedTouches[0].screenX;
-        const diff = touchEndX - touchStartX;
-        if (Math.abs(diff) > 50) {
-            if (diff > 0) goToSlide(currentIndex - 1);
-            else goToSlide(currentIndex + 1);
-        }
-    });
-
-    if (dotsNav && dotsNav.children.length === 0 && slides.length > 1) {
-        for (let i = 0; i < slides.length; i++) {
-            const dot = document.createElement('button');
-            dot.classList.add('carousel-dot');
-            if (i === currentIndex) dot.classList.add('active');
-            dot.addEventListener('click', () => goToSlide(i));
-            dotsNav.appendChild(dot);
-        }
-    }
-    window.addEventListener('resize', () => updateCarouselTransform());
-    updateCarouselTransform();
-    // НЕ вызываем bindMediaClicks здесь — он вызывается отдельно
-}
-
-// ---------- ПОЛНОЭКРАННЫЙ ПРОСМОТР ОРИГИНАЛА ----------
-function openFullMedia(src, type) {
-    const overlay = document.createElement('div');
-    overlay.className = 'media-fullscreen';
-    const closeBtn = document.createElement('div');
-    closeBtn.className = 'close-btn';
-    closeBtn.innerHTML = '&times;';
-    let media;
-    if (type === 'image') {
-        media = document.createElement('img');
-        media.src = src;
-        media.className = 'media-content';
-    } else {
-        media = document.createElement('video');
-        media.src = src;
-        media.controls = true;
-        media.autoplay = true;
-        media.className = 'media-content';
-    }
-    overlay.appendChild(media);
-    overlay.appendChild(closeBtn);
-    const removeOverlay = () => {
-        overlay.classList.remove('visible');
-        setTimeout(() => {
-            if (overlay.parentNode) overlay.remove();
-        }, 300);
-    };
-    closeBtn.onclick = removeOverlay;
-    overlay.onclick = (e) => {
-        if (e.target === overlay) removeOverlay();
-    };
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => {
-        overlay.classList.add('visible');
     });
 }
 
@@ -884,42 +687,29 @@ let currentOpenMenuPostId = null;
 
 // ---------- МЕНЮ ПОСТА ----------
 function showPostMenu(button, postId, authorId) {
-    // Если меню уже открыто для этого же поста — закрываем его
     if (currentOpenMenuPostId === postId) {
         hidePostMenu();
         return;
     }
-    
-    // Закрываем предыдущее меню, если оно было открыто для другого поста
     hidePostMenu();
-    
-    // Запоминаем, для какого поста открыто меню
     currentOpenMenuPostId = postId;
-    
     const rect = button.getBoundingClientRect();
     postMenu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
     postMenu.style.left = (rect.right + window.scrollX - 200) + 'px';
-    
     const isOwn = (authorId == currentUserId);
     let itemsHTML = '';
-    
     if (isOwn) {
         itemsHTML += `<div class="post-actions-menu__item" data-action="edit" data-post-id="${postId}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Редактировать</div>
         <div class="post-actions-menu__item post-actions-menu__item--danger" data-action="delete" data-post-id="${postId}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Удалить</div>`;
     } else {
         itemsHTML += `<div class="post-actions-menu__item" data-action="hide" data-post-id="${postId}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg> Скрыть</div>`;
     }
-    
     itemsHTML += `<div class="post-actions-menu__item" data-action="copy-link" data-post-id="${postId}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Скопировать ссылку</div>`;
-    
     if (!isOwn) {
         itemsHTML += `<div class="post-actions-menu__item" data-action="report" data-post-id="${postId}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg> Пожаловаться</div>`;
     }
-    
     postMenu.innerHTML = itemsHTML;
     postMenu.classList.add('active');
-    
-    // Обработчики для пунктов меню
     postMenu.querySelectorAll('.post-actions-menu__item').forEach(item => {
         item.addEventListener('click', function() {
             const action = this.dataset.action;
@@ -1132,8 +922,8 @@ async function openShareModal(postId) {
             <div class="share-chat-item" data-chat-id="${chat.chat_id}" data-other-user="${chat.other_user_id}"
                 style="display:flex;align-items:center;gap:12px;padding:12px;cursor:pointer;border-radius:12px;transition:background 0.2s;"
                 onmouseover="this.style.background='#f5f6fa'" onmouseout="this.style.background=''">
-                <img src="${chat.avatar || ''}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;background:#f0f0f0;">
-                <span style="font-weight:500;">${chat.first_name} ${chat.last_name}</span>
+                <img src="${kop.esc(chat.avatar || '')}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;background:#f0f0f0;">
+                <span style="font-weight:500;">${kop.esc(chat.first_name)} ${kop.esc(chat.last_name)}</span>
             </div>
         `).join('');
         chatList.querySelectorAll('.share-chat-item').forEach(item => {
@@ -1153,26 +943,18 @@ async function sendPostLink(postId, receiverId) {
     try {
         const postUrl = `${window.location.origin}/post.php?id=${postId}`;
         const csrfToken = document.querySelector('input[name="_csrf"]')?.value;
-        
-        // Используем FormData вместо JSON
         const formData = new FormData();
         formData.append('receiver_id', receiverId);
         formData.append('content', postUrl);
-        
         const response = await fetch('/api/messages/send', {
             method: 'POST',
-            headers: {
-                'X-CSRF-Token': csrfToken
-            },
+            headers: { 'X-CSRF-Token': csrfToken },
             body: formData
         });
-        
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
-            console.error('Ошибка отправки:', error);
             throw new Error(error.message || 'Ошибка при отправке');
         }
-        
         kop.flash('Пост отправлен');
     } catch(e) { 
         console.error(e);
@@ -1245,14 +1027,14 @@ async function openCommentsModal(postId) {
             commentsList.innerHTML = data.comments.map(c => {
                 const initials = (c.first_name?.charAt(0) || '') + (c.last_name?.charAt(0) || '');
                 const avatarHtml = c.avatar
-                    ? `<img src="${c.avatar}" alt="">`
-                    : `<span class="comment-avatar-placeholder">${initials}</span>`;
+                    ? `<img src="${kop.esc(c.avatar)}" alt="">`
+                    : `<span class="comment-avatar-placeholder">${kop.esc(initials)}</span>`;
                 return `
                     <div class="comment-item">
                         <div class="comment-avatar">${avatarHtml}</div>
                         <div class="comment-content">
-                            <div class="comment-author"><a href="user.php?id=${c.user_id}">${esc(c.first_name)} ${esc(c.last_name)}</a></div>
-                            <div class="comment-text">${esc(c.content)}</div>
+                            <div class="comment-author"><a href="user.php?id=${c.user_id}">${kop.esc(c.first_name)} ${kop.esc(c.last_name)}</a></div>
+                            <div class="comment-text">${kop.esc(c.content)}</div>
                             <div class="comment-date">${new Date(c.created_at).toLocaleString('ru-RU')}</div>
                         </div>
                     </div>
@@ -1276,14 +1058,14 @@ async function openCommentsModal(postId) {
                 const c = response.comment;
                 const initials = (c.first_name?.charAt(0) || '') + (c.last_name?.charAt(0) || '');
                 const avatarHtml = c.avatar
-                    ? `<img src="${c.avatar}" alt="">`
-                    : `<span class="comment-avatar-placeholder">${initials}</span>`;
+                    ? `<img src="${kop.esc(c.avatar)}" alt="">`
+                    : `<span class="comment-avatar-placeholder">${kop.esc(initials)}</span>`;
                 const newCommentHtml = `
                     <div class="comment-item">
                         <div class="comment-avatar">${avatarHtml}</div>
                         <div class="comment-content">
-                            <div class="comment-author"><a href="user.php?id=${c.user_id}">${esc(c.first_name)} ${esc(c.last_name)}</a></div>
-                            <div class="comment-text">${esc(c.content)}</div>
+                            <div class="comment-author"><a href="user.php?id=${c.user_id}">${kop.esc(c.first_name)} ${kop.esc(c.last_name)}</a></div>
+                            <div class="comment-text">${kop.esc(c.content)}</div>
                             <div class="comment-date">${new Date(c.created_at).toLocaleString('ru-RU')}</div>
                         </div>
                     </div>
@@ -1438,7 +1220,7 @@ function renderAttachments() {
             const sizeText = formatFileSize(item.file.size);
             card.innerHTML = `
                 <div class="video-icon">🎬</div>
-                <div class="video-name" title="${esc(item.file.name)}">${esc(item.file.name)}</div>
+                <div class="video-name" title="${kop.esc(item.file.name)}">${kop.esc(item.file.name)}</div>
                 <div class="video-size">${sizeText}</div>
             `;
             div.appendChild(card);
@@ -1462,7 +1244,7 @@ function renderAttachments() {
     });
 }
 
-// ---------- Функция рендеринга HTML поста с каруселью (ИСПРАВЛЕННАЯ) ----------
+// ---------- Функция рендеринга HTML поста с каруселью ----------
 function renderPostHTML(post, avatarSrc, fullName) {
     let mediaHtml = '';
     if (post.media && post.media.length) {
@@ -1471,9 +1253,9 @@ function renderPostHTML(post, avatarSrc, fullName) {
                 <div class="carousel-track">
                     ${post.media.map(media => {
                         if (media.type === 'video') {
-                            return `<div class="carousel-slide"><video controls src="${esc(media.url)}" preload="metadata"></video></div>`;
+                            return `<div class="carousel-slide"><video controls src="${kop.esc(media.url)}" preload="metadata"></video></div>`;
                         } else {
-                            return `<div class="carousel-slide"><img src="${esc(media.url)}" alt=""></div>`;
+                            return `<div class="carousel-slide"><img src="${kop.esc(media.url)}" alt=""></div>`;
                         }
                     }).join('')}
                 </div>
@@ -1519,7 +1301,6 @@ function renderPostHTML(post, avatarSrc, fullName) {
                     <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
                 </svg>
             </span>
-            <span>Комментарии</span>
         </button>
         <div class="postActions">
             <button class="sharePost" data-post-id="${post.id}">
@@ -1532,16 +1313,13 @@ function renderPostHTML(post, avatarSrc, fullName) {
             </button>
         </div>
     </div>`;
-    
-    // Время постинга: для свежего поста всегда "только что"
     const timeAgoText = 'только что';
-    
     return `
         <div class="post" data-post-id="${post.id}" data-author-id="${post.user_id}">
             <div class="postHeader">
-                <img class="opPicture" src="${avatarSrc}" alt="">
+                <img class="opPicture" src="${kop.esc(avatarSrc)}" alt="">
                 <div class="opLabel">
-                    <a href="">${fullName}</a>
+                    <a href="">${kop.esc(fullName)}</a>
                     <span class="post-time">${timeAgoText}</span>
                 </div>
                 <div class="postOptions"><button><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg></button></div>
@@ -1614,7 +1392,7 @@ function attachPostMenu() {
     });
 }
 
-// ---------- НАВИГАЦИЯ ПО ВКЛАДКАМ (ИСПРАВЛЕННАЯ) ----------
+// ---------- НАВИГАЦИЯ ПО ВКЛАДКАМ ----------
 kop.hide('.facebookSection');
 kop.hide('.personalInfoSection');
 kop.hide('#section-friends');
@@ -1632,14 +1410,12 @@ kop.on('.profileNavigation__btn', 'click', function(e) {
     allNavBtns().forEach(btn => btn.classList.remove('profileNavigation__btn--active'));
     this.classList.add('profileNavigation__btn--active');
 
-    // Скрываем всё
     document.querySelectorAll('.post').forEach(p => p.style.display = 'none');
     document.querySelector('.facebookSection').style.display = 'none';
     document.querySelector('.personalInfoSection').style.display = 'none';
     document.getElementById('section-friends').style.display = 'none';
     if (noPostsPlaceholder) noPostsPlaceholder.style.display = 'none';
 
-    // Показываем нужное + управляем заглушкой
     if (act === 'facebook') {
         document.querySelector('.facebookSection').style.display = '';
         if (noPostsPlaceholder) noPostsPlaceholder.style.display = 'none';
@@ -1650,7 +1426,6 @@ kop.on('.profileNavigation__btn', 'click', function(e) {
         document.getElementById('section-friends').style.display = '';
         if (noPostsPlaceholder) noPostsPlaceholder.style.display = 'none';
     } else {
-        // Публикации (дефолт)
         document.querySelectorAll('.post').forEach(p => p.style.display = '');
         if (noPostsPlaceholder) noPostsPlaceholder.style.display = '';
     }
@@ -1669,7 +1444,7 @@ attachCollectionButtons();
 attachShareButtons();
 initFriendsActions();
 
-// Добавим стили для хештегов динамически, если их нет в main.css
+// Добавим стили для хештегов динамически
 const hashtagStyle = document.createElement('style');
 hashtagStyle.textContent = '.hashtag-link{color:#3b5dd3;text-decoration:none;font-weight:500}.hashtag-link:hover{text-decoration:underline}';
 document.head.appendChild(hashtagStyle);
@@ -1678,7 +1453,7 @@ document.head.appendChild(hashtagStyle);
 <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
 
 <script>
-// Фотоальбом (без изменений)
+// Фотоальбом
 (function() {
     if (!window.csrfToken) window.csrfToken = document.querySelector('input[name="_csrf"]')?.value;
     const uploadBtn = document.getElementById('upload-photo-btn');
@@ -1702,7 +1477,7 @@ document.head.appendChild(hashtagStyle);
                     img.addEventListener('click', () => {
                         const viewer = document.createElement('div');
                         viewer.className = 'image-viewer';
-                        viewer.innerHTML = `<img src="${photo.url || ''}" alt="">`;
+                        viewer.innerHTML = `<img src="${kop.esc(photo.url || '')}" alt="">`;
                         viewer.addEventListener('click', () => viewer.remove());
                         document.body.appendChild(viewer);
                     });

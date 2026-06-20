@@ -46,13 +46,13 @@ $success = flash('success');
     <link rel="stylesheet" href="css/main.css">
 </head>
 <body>
-    <div class="sidebar"><?php require_once "components/header.php"; ?></div>
+    <?php require_once "components/header.php"; ?>
     <div class="settingsMainArea">
         <div class="accountHeader">
             <p><?= esc($user['first_name'] . ' ' . $user['last_name']) ?></p>
         </div>
         <div class="accountCard" style="max-width:500px; margin: 20px auto;">
-            <!-- Кнопка «Назад» -->
+            <!-- Кнопка «Назад» в настройки -->
             <a href="settings.php?act=account-info" class="escapeButton" style="display:inline-flex; align-items:center; gap:6px; text-decoration:none; margin-bottom:10px;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
                 Назад

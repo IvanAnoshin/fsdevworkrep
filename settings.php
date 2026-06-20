@@ -1,7 +1,19 @@
 <?php
 ob_start();
 require_once __DIR__ . '/components/header.php';
+
+// Гость не должен быть здесь — require_auth() уже должен был перенаправить,
+// но на всякий случай делаем проверку
+if (!is_logged_in()) {
+    redirect('/feed.php');
+    exit;
+}
+
 $user = find('users', $_SESSION['user_id']);
+if (!$user) {
+    echo '<p>Пользователь не найден</p>';
+    exit;
+}
 $pageTitle = 'Настройки - Friendscape';
 
 // Проверка, является ли текущий пользователь администратором
@@ -58,6 +70,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             update('users', $_SESSION['user_id'], $updateData);
+            require_once __DIR__ . '/dfsn.php';
+            $dfsn = new DFSN();
+            $profileWords = [];
+            $fields = ['hometown', 'city', 'country', 'languages', 'interests', 'about',
+                    'job', 'education', 'religion', 'personality', 'dreams', 'intentions',
+                    'values', 'quotes', 'idols', 'gadgets'];
+            foreach ($fields as $field) {
+                if (!empty($user[$field])) {
+                    $profileWords[] = $user[$field];
+                }
+            }
+            $dfsn->updateProfileVector($_SESSION['user_id'], $profileWords);
         }
 
         ob_end_clean();
@@ -880,6 +904,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         hideAllSections();
 
+        // Автооткрытие по URL (без автоматического клика)
+        const urlParams = new URLSearchParams(window.location.search);
+        const act = urlParams.get('act');
+        if (act === 'account-info') {
+            kop.hide('.settingsList');
+            kop.show('.account-info');
+            setTimeout(loadSessions, 100);
+        } else if (act === 'edit') {
+            kop.hide('.settingsList');
+            kop.show('.editSection');
+        } else if (act === 'passport') {
+            kop.hide('.settingsList');
+            kop.show('.passportSection');
+        } else if (act === 'privacy') {
+            kop.hide('.settingsList');
+            kop.show('.privacySection');
+        } else if (act === 'notifications') {
+            kop.hide('.settingsList');
+            kop.show('.notifications');
+        } else {
+            kop.show('.settingsList');
+        }
+
         // Загрузка сессий
         async function loadSessions() {
             const container = document.getElementById('sessions-list');
@@ -1053,17 +1100,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         async function generateNewPassport() {
+            // Запрашиваем пароль перед генерацией
+            const password = await showPasswordModal('Новый паспорт', 'Введите пароль');
+            if (!password) return;
+
             if (!confirm('Вы уверены, что хотите сгенерировать новый паспорт? Старый станет недействительным.')) return;
 
             try {
                 const resp = await fetch('/api/user/generate-passport', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken }
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken },
+                    body: JSON.stringify({ password })
                 });
                 const data = await resp.json();
 
                 if (resp.ok && data.new_passport) {
-                    // Убираем блокировку
                     const overlay = document.getElementById('passport-blur-overlay');
                     if (overlay) {
                         overlay.style.opacity = '0';
@@ -1084,15 +1135,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // ========== НАВИГАЦИЯ ==========
         kop.on('.settingsList a', 'click', function(e) {
-            e.preventDefault();
+            // Для ссылок без параметра act (Выйти, Управление) не отменяем стандартный переход
             const url = new URL(this.href);
             const act = url.searchParams.get('act');
+            if (!act) return; // даём ссылке отработать как обычно
+
+            e.preventDefault();
 
             kop.hide('.account-info');
             kop.hide('.editSection');
             kop.hide('.passportSection');
             kop.hide('.privacySection');
             kop.hide('.notifications');
+
+            // Скрываем плашку с именем, когда заходим в любую вкладку
+            const header = document.querySelector('.accountHeader');
+            if (header) header.style.display = 'none';
 
             if (act === 'account-info') {
                 kop.show('.account-info');
@@ -1117,6 +1175,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             e.preventDefault();
             hideAllSections();
             kop.show('.settingsList');
+
+            // Показываем плашку с именем обратно
+            const header = document.querySelector('.accountHeader');
+            if (header) header.style.display = '';
         });
 
         // Автосохранение приватности

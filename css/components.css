@@ -815,13 +815,12 @@ body.no-scroll { overflow: hidden; }
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
-    margin-top: 8px;
 }
 
 .attachment-item {
     position: relative;
-    width: 200px;
-    height: 200px;
+    width: 100px;
+    height: 100px;
     border-radius: 12px;
     overflow: hidden;
     background: #f0f2f5;

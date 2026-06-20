@@ -39,6 +39,7 @@
         pendingFilesContainer: null,
         currentPostId: null
     };
+    window.debugState = state;
 
     // ---------- КАСТОМНОЕ МОДАЛЬНОЕ ОКНО ПОДТВЕРЖДЕНИЯ ----------
     function asyncConfirm(message, title = 'Подтверждение') {
@@ -174,31 +175,78 @@
         document.body.appendChild(viewer);
     };
 
-    function renderPostPreviewCard(previewData) {
-        if (!previewData) return '';
-        let p;
-        try {
-            p = typeof previewData === 'string' ? JSON.parse(previewData) : previewData;
-            if (!p?.url) return '';
-        } catch(e) { return ''; }
-        const mediaHtml = p.media_url
-            ? (p.media_type === 'video'
-                ? `<video controls src="${esc(p.media_url)}" style="width:100%; max-height:150px; object-fit:cover; border-radius:8px;"></video>`
-                : `<img src="${esc(p.media_url)}" style="width:100%; max-height:150px; object-fit:cover; border-radius:8px;">`)
-            : '<div style="background:#eef1f8; height:120px; display:flex; align-items:center; justify-content:center; border-radius:8px;">📄 Пост без медиа</div>';
-        return `
-            <div class="post-preview-card" data-post-url="${esc(p.url)}" style="cursor:pointer; margin-top:8px; border:1px solid #e0e0e0; border-radius:12px; overflow:hidden; background:#fff; max-width:300px;">
-                <div style="display:flex; align-items:center; gap:8px; padding:8px;">
-                    <img src="${esc(p.author_avatar || '')}" style="width:28px; height:28px; border-radius:50%; object-fit:cover;" onerror="this.src=''">
-                    <span style="font-weight:600; font-size:0.85rem;">${esc(p.author_name || 'Пользователь')}</span>
+function renderPostPreviewCard(previewData) {
+    if (!previewData) return '';
+    let p;
+    try {
+        p = typeof previewData === 'string' ? JSON.parse(previewData) : previewData;
+        if (!p?.url) return '';
+    } catch(e) { return ''; }
+
+    // --- Медиа ---
+    let mediaHtml = '';
+    if (p.media_list && p.media_list.length) {
+        // Поддержка нескольких медиа (карусель)
+        const slides = p.media_list.map((m, idx) => {
+            const url = esc(m.url || m.file_url || '');
+            if (m.type === 'video' || m.media_type === 'video') {
+                return `<div class="carousel-slide"><video src="${url}" preload="metadata"></video></div>`;
+            } else {
+                return `<div class="carousel-slide"><img src="${url}" alt="" loading="lazy"></div>`;
+            }
+        }).join('');
+
+        const arrows = p.media_list.length > 1 ? `
+            <button class="carousel-prev" style="position:absolute; top:50%; left:8px; transform:translateY(-50%); background:rgba(0,0,0,0.5); border:none; border-radius:50%; width:32px; height:32px; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button class="carousel-next" style="position:absolute; top:50%; right:8px; transform:translateY(-50%); background:rgba(0,0,0,0.5); border:none; border-radius:50%; width:32px; height:32px; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+        ` : '';
+
+        mediaHtml = `
+            <div class="carousel-container" style="position:relative; width:100%; aspect-ratio:1/1; overflow:hidden; background:#000; border-radius:0;">
+                <div class="carousel-track" style="display:flex; transition:transform 0.3s ease; width:100%; height:100%;">
+                    ${slides}
                 </div>
-                ${mediaHtml}
-                <div style="padding:8px;">
-                    <div style="font-size:0.85rem; color:#1e1e2f;">${esc(p.content || '')}</div>
-                    <div style="font-size:0.7rem; color:#8b8fa3; margin-top:4px;">❤️ ${p.likes_count || 0} лайков</div>
-                </div>
+                ${arrows}
+            </div>
+        `;
+    } else if (p.media_url) {
+        // Одиночное медиа (старый формат)
+        if (p.media_type === 'video') {
+            mediaHtml = `<div class="carousel-container" style="position:relative; width:100%; aspect-ratio:1/1; overflow:hidden; background:#000; border-radius:0;">
+                <div class="carousel-slide"><video src="${esc(p.media_url)}" controls preload="metadata" style="width:100%; height:100%; object-fit:cover;"></video></div>
             </div>`;
+        } else {
+            mediaHtml = `<div class="carousel-container" style="position:relative; width:100%; aspect-ratio:1/1; overflow:hidden; background:#000; border-radius:0;">
+                <img src="${esc(p.media_url)}" alt="" style="width:100%; height:100%; object-fit:cover;">
+            </div>`;
+        }
+    } else {
+        // Без медиа
+        mediaHtml = '<div style="background:#eef1f8; aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; border-radius:0;">📄 Пост без медиа</div>';
     }
+
+    // --- Имя автора и аватар ---
+    const authorName = esc(p.author_name || 'Пользователь');
+    const authorAvatar = esc(p.author_avatar || '');
+    const contentPreview = esc(p.content || '');
+
+    return `
+        <div class="post-preview-card" data-post-url="${esc(p.url)}" style="cursor:pointer; margin-top:8px; border:1px solid #e0e0e0; border-radius:12px; overflow:hidden; background:#fff; max-width:300px;">
+            <div style="display:flex; align-items:center; gap:8px; padding:8px;">
+                <img src="${authorAvatar}" style="width:28px; height:28px; border-radius:50%; object-fit:cover;" onerror="this.src=''">
+                <span style="font-weight:600; font-size:0.85rem;">${authorName}</span>
+            </div>
+            ${mediaHtml}
+            <div style="padding:8px;">
+                <div style="font-size:0.85rem; color:#1e1e2f;">${contentPreview}</div>
+            </div>
+        </div>
+    `;
+}
 
     // Превью вложений
     function renderPendingAttachments() {
@@ -337,7 +385,8 @@
             let msgHtml = data.file_url
                 ? renderFileMessage(data.file_url, data.file_name || 'file', true, data.message_id, date)
                 : `<div class="myMessageBubble message animate-in" data-msg-id="${data.message_id}" data-is-mine="true" data-chat-type="${isGroup ? 'group' : 'private'}">
-                    <p>${esc(data.cleaned_content || data.content)}</p>
+                    ${data.post_preview ? '' : `<p>${esc(data.cleaned_content || data.content)}</p>`}
+                    ${data.post_preview ? renderPostPreviewCard(data.post_preview) : ''}
                     <div class="messageInfo"><p></p><p>${formatTime(date)}</p></div>
                 </div>`;
             container.insertAdjacentHTML('beforeend', msgHtml);
@@ -455,32 +504,32 @@
     }
 
     // ---------- ПОДГРУЗКА СТАРЫХ СООБЩЕНИЙ ----------
-    async function appendMessages(container, newMessages, isGroup = false) {
-        if (!newMessages.length) return;
-        const oldScrollHeight = container.scrollHeight;
-        const oldScrollTop = container.scrollTop;
-        let fragmentHtml = '', lastDate = '';
-        for (const msg of newMessages) {
-            const date = parseServerDate(msg.created_at);
-            const dateStr = date.toLocaleDateString('ru-RU');
-            if (dateStr !== lastDate) {
-                fragmentHtml += `<div class="chatDateBubble"><p>${dateStr}</p></div>`;
-                lastDate = dateStr;
-            }
-            const isMine = msg.sender_id == state.userId;
-            const senderName = isGroup && !isMine ? `${msg.first_name} ${msg.last_name}` : '';
-            fragmentHtml += msg.file_url
-                ? renderFileMessage(msg.file_url, msg.file_url.split('/').pop(), isMine, msg.id, date)
-                : `<div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}" data-chat-type="${isGroup ? 'group' : 'private'}">
-                    ${senderName ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}
-                    ${msg.content ? `<p>${esc(msg.content)}</p>` : ''}
-                    ${msg.post_preview ? renderPostPreviewCard(msg.post_preview) : ''}
-                    <div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>
-                </div>`;
+async function appendMessages(container, newMessages, isGroup = false) {
+    if (!newMessages.length) return;
+    const oldScrollHeight = container.scrollHeight;
+    const oldScrollTop = container.scrollTop;
+    let fragmentHtml = '', lastDate = '';
+    for (const msg of newMessages) {
+        const date = parseServerDate(msg.created_at);
+        const dateStr = date.toLocaleDateString('ru-RU');
+        if (dateStr !== lastDate) {
+            fragmentHtml += `<div class="chatDateBubble"><p>${dateStr}</p></div>`;
+            lastDate = dateStr;
         }
-        container.insertAdjacentHTML('afterbegin', fragmentHtml);
-        container.scrollTop = oldScrollTop + (container.scrollHeight - oldScrollHeight);
+        const isMine = msg.sender_id == state.userId;
+        const senderName = isGroup && !isMine ? `${msg.first_name} ${msg.last_name}` : '';
+        fragmentHtml += msg.file_url
+            ? renderFileMessage(msg.file_url, msg.file_url.split('/').pop(), isMine, msg.id, date)
+            : `<div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}" data-chat-type="${isGroup ? 'group' : 'private'}">
+                ${senderName ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}
+                ${msg.post_preview ? '' : (msg.content ? `<p>${esc(msg.content)}</p>` : '')}
+                ${msg.post_preview ? renderPostPreviewCard(msg.post_preview) : ''}
+                <div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>
+            </div>`;
     }
+    container.insertAdjacentHTML('afterbegin', fragmentHtml);
+    container.scrollTop = oldScrollTop + (container.scrollHeight - oldScrollHeight);
+}
 
     // ---------- ЗАГРУЗКА СПИСКА ЧАТОВ ----------
     async function loadChats() {
@@ -677,7 +726,7 @@ function updateUnreadBadge(id, type, increment = false, reset = false) {
                             const msgHtml = msg.file_url
                                 ? renderFileMessage(msg.file_url, msg.file_url.split('/').pop(), msg.sender_id == state.userId, msg.id, date)
                                 : `<div class="${msg.sender_id == state.userId ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${msg.sender_id == state.userId}" data-chat-type="private">
-                                    ${msg.content ? `<p>${esc(msg.content)}</p>` : ''}
+                                    ${msg.post_preview ? '' : (msg.content ? `<p>${esc(msg.content)}</p>` : '')}
                                     ${msg.post_preview ? renderPostPreviewCard(msg.post_preview) : ''}
                                     <div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>
                                 </div>`;
@@ -733,7 +782,7 @@ function updateUnreadBadge(id, type, increment = false, reset = false) {
                                 ? renderFileMessage(msg.file_url, msg.file_url.split('/').pop(), isMine, msg.id, date)
                                 : `<div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}" data-chat-type="group">
                                     ${!isMine ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}
-                                    ${msg.content ? `<p>${esc(msg.content)}</p>` : ''}
+                                    ${msg.post_preview ? '' : (msg.content ? `<p>${esc(msg.content)}</p>` : '')}
                                     ${msg.post_preview ? renderPostPreviewCard(msg.post_preview) : ''}
                                     <div class="messageInfo"><p></p><p>${formatTime(date)}</p></div>
                                 </div>`;
@@ -839,28 +888,31 @@ function updateUnreadBadge(id, type, increment = false, reset = false) {
         }
     }
 
-    function renderMessages(container, messages, isGroup = false) {
-        messages.sort((a,b) => a.id - b.id);
-        let html = '', lastDate = '';
-        for (const msg of messages) {
-            const date = parseServerDate(msg.created_at);
-            const dateStr = date.toLocaleDateString('ru-RU');
-            if (dateStr !== lastDate) { html += `<div class="chatDateBubble"><p>${dateStr}</p></div>`; lastDate = dateStr; }
-            const isMine = msg.sender_id == state.userId;
-            const senderName = isGroup && !isMine ? `${msg.first_name} ${msg.last_name}` : '';
-            html += msg.file_url
-                ? renderFileMessage(msg.file_url, msg.file_url.split('/').pop(), isMine, msg.id, date)
-                : `<div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}" data-chat-type="${isGroup ? 'group' : 'private'}">
-                    ${senderName ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}
-                    ${msg.content ? `<p>${esc(msg.content)}</p>` : ''}
-                    ${msg.post_preview ? renderPostPreviewCard(msg.post_preview) : ''}
-                    <div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>
-                </div>`;
+function renderMessages(container, messages, isGroup = false) {
+    messages.sort((a,b) => a.id - b.id);
+    let html = '', lastDate = '';
+    for (const msg of messages) {
+        const date = parseServerDate(msg.created_at);
+        const dateStr = date.toLocaleDateString('ru-RU');
+        if (dateStr !== lastDate) {
+            html += `<div class="chatDateBubble"><p>${dateStr}</p></div>`;
+            lastDate = dateStr;
         }
-        container.innerHTML = html || '<p class="media-empty">Нет сообщений</p>';
-        setTimeout(() => container.scrollTop = container.scrollHeight, 50);
-        attachMessageMenuEvents(container);
+        const isMine = msg.sender_id == state.userId;
+        const senderName = isGroup && !isMine ? `${msg.first_name} ${msg.last_name}` : '';
+        html += msg.file_url
+            ? renderFileMessage(msg.file_url, msg.file_url.split('/').pop(), isMine, msg.id, date)
+            : `<div class="${isMine ? 'myMessageBubble' : 'receivedMessage'} message animate-in" data-msg-id="${msg.id}" data-is-mine="${isMine}" data-chat-type="${isGroup ? 'group' : 'private'}">
+                ${senderName ? `<div class="message-sender" style="font-size:0.75rem;color:#8b8fa3;margin-bottom:4px;">${esc(senderName)}</div>` : ''}
+                ${msg.post_preview ? '' : (msg.content ? `<p>${esc(msg.content)}</p>` : '')}
+                ${msg.post_preview ? renderPostPreviewCard(msg.post_preview) : ''}
+                <div class="messageInfo"><p>${msg.is_read ? 'прочитано' : ''}</p><p>${formatTime(date)}</p></div>
+            </div>`;
     }
+    container.innerHTML = html || '<p class="media-empty">Нет сообщений</p>';
+    setTimeout(() => container.scrollTop = container.scrollHeight, 50);
+    attachMessageMenuEvents(container);
+}
 
     function attachMessageMenuEvents(container) {
         container.querySelectorAll('.message').forEach(msgDiv => {
@@ -1100,77 +1152,87 @@ function updateUnreadBadge(id, type, increment = false, reset = false) {
     // ---------- ПАНЕЛЬ ПРОСМОТРА ПОСТА ----------
     const postCache = {};
 
-    function renderPostForChat(post) {
-        const fullName = esc(post.first_name) + ' ' + esc(post.last_name);
-        const profileUrl = (post.user_id == state.userId) ? '/profile.php' : `/user.php?id=${post.user_id}`;
-        const isLiked = (post.user_reaction === 'like');
-        const isDisliked = (post.user_reaction === 'dislike');
-        
-        let mediaHtml = '';
-        if (post.media && post.media.length) {
-            mediaHtml = '<div class="carousel-container"><div class="carousel-track">';
-            for (const media of post.media) {
-                if (media.media_type === 'video') {
-                    mediaHtml += `<div class="carousel-slide"><video controls src="${esc(media.file_url)}" preload="metadata"></video></div>`;
-                } else {
-                    mediaHtml += `<div class="carousel-slide"><img src="${esc(media.file_url)}" alt=""></div>`;
-                }
+function renderPostForChat(post) {
+    const fullName = esc(post.first_name) + ' ' + esc(post.last_name);
+    const profileUrl = (post.user_id == state.userId) ? '/profile.php' : `/user.php?id=${post.user_id}`;
+    const isLiked = (post.user_reaction === 'like');
+    const isDisliked = (post.user_reaction === 'dislike');
+
+    // --- Карусель ---
+    let mediaHtml = '';
+    if (post.media && post.media.length) {
+        const slides = post.media.map(media => {
+            if (media.media_type === 'video') {
+                return `<div class="carousel-slide"><video controls src="${esc(media.file_url)}" preload="metadata"></video></div>`;
+            } else {
+                return `<div class="carousel-slide"><img src="${esc(media.file_url)}" alt="" style="width:100%; height:100%; object-fit:cover; cursor:pointer;"></div>`;
             }
-            mediaHtml += '</div>';
-            if (post.media.length > 1) {
-                mediaHtml += `<button class="carousel-prev"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
-                             <button class="carousel-next"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></button>
-                             <div class="carousel-dots"></div>`;
-            }
-            mediaHtml += '</div>';
-        }
-        const textHtml = post.content ? `<div class="postBodyText">${esc(post.content)}</div>` : '';
-        let avatarHtml = '';
-        if (post.avatar) {
-            avatarHtml = `<img class="opPicture" src="${esc(post.avatar)}" alt="" onerror="this.onerror=null;this.src='';this.style.display='none';this.nextSibling.style.display='flex';">`;
-            avatarHtml += `<div class="opPicture-placeholder" style="display:none;">${esc((post.first_name?.charAt(0)||'')+(post.last_name?.charAt(0)||''))}</div>`;
-        } else {
-            avatarHtml = `<div class="opPicture-placeholder">${esc((post.first_name?.charAt(0)||'')+(post.last_name?.charAt(0)||''))}</div>`;
-        }
-        
-        return `
-            <div class="post" data-post-id="${post.id}" data-author-id="${post.user_id}">
-                <div class="postHeader">
-                    ${avatarHtml}
-                    <div class="opLabel"><a href="${profileUrl}">${fullName}</a></div>
+        }).join('');
+
+        const arrows = post.media.length > 1 ? `
+            <button class="carousel-prev" style="position:absolute; top:50%; left:10px; transform:translateY(-50%); background:rgba(0,0,0,0.6); border:none; border-radius:50%; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button class="carousel-next" style="position:absolute; top:50%; right:10px; transform:translateY(-50%); background:rgba(0,0,0,0.6); border:none; border-radius:50%; width:40px; height:40px; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:2;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+            <div class="carousel-dots" style="position:absolute; bottom:10px; left:50%; transform:translateX(-50%); display:flex; gap:8px; z-index:2;"></div>
+        ` : '';
+
+        mediaHtml = `
+            <div class="carousel-container" style="position:relative; width:100%; aspect-ratio:1/1; overflow:hidden; background:#000; border-radius:0;">
+                <div class="carousel-track" style="display:flex; transition:transform 0.3s ease; width:100%; height:100%;">
+                    ${slides}
                 </div>
-                <div class="postBody">${mediaHtml}${textHtml}</div>
-                <div class="postFooter">
-                    <div class="postReactions">
-                        <button class="likeButton ${isLiked ? 'active' : ''}" data-post-id="${post.id}">
-                            <span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                            </span>
-                        </button>
-                        <p class="positiveCounter">${post.likes_count}</p>
-                        <button class="dislikeButton ${isDisliked ? 'active' : ''}" data-post-id="${post.id}">
-                            <span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                            </span>
-                        </button>
-                        <p class="negativeCounter">${post.dislikes_count}</p>
-                    </div>
-                    <div class="postActions">
-                        <button class="collectionButton" data-post-id="${post.id}" title="В коллекцию">
-                            <span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
-                            </span>
-                        </button>
-                        <button class="sharePost" data-post-id="${post.id}">
-                            <span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98"/><path d="M15.41 6.51l-6.82 3.98"/></svg>
-                            </span>
-                        </button>
-                    </div>
-                </div>
+                ${arrows}
             </div>
         `;
     }
+
+    const textHtml = post.content ? `<div class="postBodyText" style="padding:14px 18px; font-size:1em; line-height:1.5; color:#1e1e2f;">${esc(post.content)}</div>` : '';
+
+    // --- Аватар ---
+    let avatarHtml = '';
+    if (post.avatar) {
+        avatarHtml = `<img class="opPicture" src="${esc(post.avatar)}" alt="" style="width:44px; height:44px; border-radius:50%; object-fit:cover; border:2px solid #f0f2f5;" onerror="this.onerror=null;this.src='';this.style.display='none';this.nextSibling.style.display='flex';">`;
+        avatarHtml += `<div class="opPicture-placeholder" style="width:44px; height:44px; border-radius:50%; background:#e0e7ff; color:#3b5dd3; display:none; align-items:center; justify-content:center; font-weight:600; font-size:1.2rem;">${esc((post.first_name?.charAt(0)||'')+(post.last_name?.charAt(0)||''))}</div>`;
+    } else {
+        avatarHtml = `<div class="opPicture-placeholder" style="width:44px; height:44px; border-radius:50%; background:#e0e7ff; color:#3b5dd3; display:flex; align-items:center; justify-content:center; font-weight:600; font-size:1.2rem;">${esc((post.first_name?.charAt(0)||'')+(post.last_name?.charAt(0)||''))}</div>`;
+    }
+
+    return `
+        <div class="post" data-post-id="${post.id}" data-author-id="${post.user_id}" style="background:white; border-radius:20px; box-shadow:0 8px 24px rgba(0,0,0,0.04); overflow:hidden; max-width:480px; margin:0 auto;">
+            <div class="postHeader" style="display:flex; align-items:center; gap:12px; padding:14px 18px;">
+                ${avatarHtml}
+                <div class="opLabel"><a href="${profileUrl}" style="text-decoration:none; color:black; font-weight:500; font-size:1.3em;">${fullName}</a></div>
+            </div>
+            <div class="postBody" style="padding:0;">${mediaHtml}${textHtml}</div>
+            <div class="postFooter" style="display:flex; align-items:center; gap:12px; padding:10px 18px;">
+                <div class="postReactions" style="display:flex; align-items:center; gap:6px;">
+                    <button class="likeButton ${isLiked ? 'active' : ''}" data-post-id="${post.id}" style="background:none; border:none; cursor:pointer; padding:6px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px;">
+                        <span class="Menu__icon" style="background:#f0f0f0; color:#3b5dd3; width:36px; height:36px; display:flex; align-items:center; justify-content:center; border-radius:10px;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </span>
+                    </button>
+                    <p class="positiveCounter" style="font-size:1.3em; color:#707079; min-width:20px; text-align:center;">${post.likes_count}</p>
+                    <button class="dislikeButton ${isDisliked ? 'active' : ''}" data-post-id="${post.id}" style="background:none; border:none; cursor:pointer; padding:6px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px;">
+                        <span class="Menu__icon" style="background:#f0f0f0; color:#3b5dd3; width:36px; height:36px; display:flex; align-items:center; justify-content:center; border-radius:10px;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                        </span>
+                    </button>
+                    <p class="negativeCounter" style="font-size:1.3em; color:#707079; min-width:20px; text-align:center;">${post.dislikes_count}</p>
+                </div>
+                <div class="postActions" style="display:flex; align-items:center; gap:12px; margin-left:auto;">
+                    <button class="sharePost" data-post-id="${post.id}" style="background:none; border:none; cursor:pointer; padding:6px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px;">
+                        <span class="Menu__icon" style="background:#f0f0f0; color:#3b5dd3; width:36px; height:36px; display:flex; align-items:center; justify-content:center; border-radius:10px;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98"/><path d="M15.41 6.51l-6.82 3.98"/></svg>
+                        </span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
 
     async function addToCollection(postId) {
         try {
@@ -1227,6 +1289,7 @@ function updateUnreadBadge(id, type, increment = false, reset = false) {
         const carousel = postContainer.querySelector('.carousel-container');
         if (carousel && typeof window.initCarousel === 'function') {
             window.initCarousel(carousel);
+            bindMediaClicks();
         }
 
         postContainer.querySelectorAll('.likeButton, .dislikeButton').forEach(btn => {
@@ -1237,14 +1300,26 @@ function updateUnreadBadge(id, type, increment = false, reset = false) {
                     const resp = await apiPost(endpoint, { post_id: postId });
                     if (resp.success) {
                         const postDiv = this.closest('.post');
-                        postDiv.querySelector('.positiveCounter').textContent = resp.likes_count;
-                        postDiv.querySelector('.negativeCounter').textContent = resp.dislikes_count;
                         const likeBtn = postDiv.querySelector('.likeButton');
                         const dislikeBtn = postDiv.querySelector('.dislikeButton');
-                        likeBtn.classList.toggle('active', resp.user_liked);
-                        dislikeBtn.classList.toggle('active', resp.user_disliked);
+                        const positiveCounter = postDiv.querySelector('.positiveCounter');
+                        const negativeCounter = postDiv.querySelector('.negativeCounter');
+
+                        if (positiveCounter) positiveCounter.textContent = formatCount(resp.likes_count);
+                        if (negativeCounter) negativeCounter.textContent = formatCount(resp.dislikes_count);
+                        if (likeBtn) likeBtn.classList.toggle('active', resp.user_liked);
+                        if (dislikeBtn) dislikeBtn.classList.toggle('active', resp.user_disliked);
+
+                        // Обновляем кэш поста
+                        if (postCache[postId]) {
+                            postCache[postId].likes_count = resp.likes_count;
+                            postCache[postId].dislikes_count = resp.dislikes_count;
+                            postCache[postId].user_reaction = resp.user_liked ? 'like' : (resp.user_disliked ? 'dislike' : null);
+                        }
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.error('Reaction error:', e);
+                }
             });
         });
 
@@ -1374,9 +1449,27 @@ function updateUnreadBadge(id, type, increment = false, reset = false) {
                         const otherUserId = item.dataset.otherUser;
                         const postUrl = `${window.location.origin}/post.php?id=${postId}`;
                         try {
-                            await apiPost('/api/messages/send', { receiver_id: otherUserId, content: postUrl });
+                            const formData = new FormData();
+                            formData.append('receiver_id', otherUserId);
+                            formData.append('content', postUrl);
+                            
+                            const response = await fetch('/api/messages/send', {
+                                method: 'POST',
+                                headers: { 'X-CSRF-Token': window.csrfToken },
+                                body: formData
+                            });
+                            
+                            if (!response.ok) {
+                                const error = await response.json().catch(() => ({}));
+                                console.error('Ошибка отправки:', error);
+                                throw new Error(error.message || 'Ошибка при отправке');
+                            }
+                            
                             kop.flash('Пост отправлен');
-                        } catch (e) { kop.flash('Ошибка при отправке'); }
+                        } catch (e) { 
+                            console.error(e);
+                            kop.flash('Ошибка при отправке: ' + e.message); 
+                        }
                         overlay.classList.remove('active');
                         setTimeout(() => overlay.remove(), 300);
                     });
@@ -2166,8 +2259,6 @@ function showChatList() {
     chatViewPanel.innerHTML = '<div class="chat-placeholder"><p>Выберите чат слева</p></div>';
     // Мобильная адаптивность: показываем список чатов
     document.querySelector('.messengerMainArea')?.classList.remove('chat-open');
-    // Мобильная адаптивность
-document.querySelector('.messengerMainArea')?.classList.remove('chat-open');
 }
 
 async function openPrivateChat(chatId, push = true) {
@@ -2444,48 +2535,55 @@ async function openCollectionChat(chatId, push = true) {
         });
     }
 
-    window.initCarousel = window.initCarousel || function(container) {
-        const track = container.querySelector('.carousel-track');
-        const slides = track ? Array.from(track.children) : [];
-        if (slides.length <= 1) return;
-        const prevBtn = container.querySelector('.carousel-prev');
-        const nextBtn = container.querySelector('.carousel-next');
-        const dotsNav = container.querySelector('.carousel-dots');
-        let currentIndex = 0;
-        function updateCarousel() {
-            const slideWidth = slides[0].getBoundingClientRect().width;
-            track.style.transform = 'translateX(-' + (currentIndex * slideWidth) + 'px)';
-            if (dotsNav) {
-                Array.from(dotsNav.children).forEach((dot, i) => dot.classList.toggle('active', i === currentIndex));
-            }
+window.initCarousel = window.initCarousel || function(container) {
+    const track = container.querySelector('.carousel-track');
+    const slides = track ? Array.from(track.children) : [];
+    if (slides.length <= 1) return;
+    const prevBtn = container.querySelector('.carousel-prev');
+    const nextBtn = container.querySelector('.carousel-next');
+    const dotsNav = container.querySelector('.carousel-dots');
+    let currentIndex = 0;
+
+    function updateCarousel() {
+        const slideWidth = slides[0].getBoundingClientRect().width;
+        track.style.transform = 'translateX(-' + (currentIndex * slideWidth) + 'px)';
+        if (dotsNav) {
+            Array.from(dotsNav.children).forEach((dot, i) => {
+                dot.classList.toggle('active', i === currentIndex);
+            });
         }
-        function goToSlide(index) {
-            if (index < 0) index = 0;
-            if (index >= slides.length) index = slides.length - 1;
-            if (index === currentIndex) return;
-            currentIndex = index;
-            updateCarousel();
-        }
-        if (prevBtn) prevBtn.addEventListener('click', () => goToSlide(currentIndex - 1));
-        if (nextBtn) nextBtn.addEventListener('click', () => goToSlide(currentIndex + 1));
-        let touchStartX = 0;
-        container.addEventListener('touchstart', e => touchStartX = e.changedTouches[0].screenX);
-        container.addEventListener('touchend', e => {
-            const diff = e.changedTouches[0].screenX - touchStartX;
-            if (Math.abs(diff) > 50) diff > 0 ? goToSlide(currentIndex - 1) : goToSlide(currentIndex + 1);
-        });
-        if (dotsNav && dotsNav.children.length === 0 && slides.length > 1) {
-            for (let i = 0; i < slides.length; i++) {
-                const dot = document.createElement('button');
-                dot.classList.add('carousel-dot');
-                if (i === currentIndex) dot.classList.add('active');
-                dot.addEventListener('click', () => goToSlide(i));
-                dotsNav.appendChild(dot);
-            }
-        }
-        window.addEventListener('resize', updateCarousel);
+    }
+    function goToSlide(index) {
+        if (index < 0) index = 0;
+        if (index >= slides.length) index = slides.length - 1;
+        if (index === currentIndex) return;
+        currentIndex = index;
         updateCarousel();
-    };
+    }
+    if (prevBtn) prevBtn.addEventListener('click', () => goToSlide(currentIndex - 1));
+    if (nextBtn) nextBtn.addEventListener('click', () => goToSlide(currentIndex + 1));
+
+    let touchStartX = 0;
+    container.addEventListener('touchstart', e => touchStartX = e.changedTouches[0].screenX);
+    container.addEventListener('touchend', e => {
+        const diff = e.changedTouches[0].screenX - touchStartX;
+        if (Math.abs(diff) > 50) diff > 0 ? goToSlide(currentIndex - 1) : goToSlide(currentIndex + 1);
+    });
+    if (dotsNav && dotsNav.children.length === 0 && slides.length > 1) {
+        for (let i = 0; i < slides.length; i++) {
+            const dot = document.createElement('button');
+            dot.classList.add('carousel-dot');
+            if (i === currentIndex) dot.classList.add('active');
+            dot.addEventListener('click', () => goToSlide(i));
+            dotsNav.appendChild(dot);
+        }
+    }
+    window.addEventListener('resize', updateCarousel);
+    updateCarousel();
+
+    // ← ВАЖНАЯ ДОБАВКА
+    bindMediaClicks();
+};
 
     window.openFullMedia = window.openFullMedia || function(src, type) {
         const viewer = document.createElement('div');
@@ -2525,6 +2623,49 @@ async function openCollectionChat(chatId, push = true) {
         closeBtn.onclick = remove;
         viewer.onclick = e => { if (e.target === viewer) remove(); };
     };
+
+    function bindMediaClicks() {
+    // Картинки в карусели
+    document.querySelectorAll('.carousel-slide img').forEach(img => {
+        if (!img.dataset.clickBound) {
+            img.dataset.clickBound = '1';
+            img.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (typeof openFullMedia === 'function') {
+                    openFullMedia(img.src, 'image');
+                } else if (typeof window.openImageViewer === 'function') {
+                    window.openImageViewer(img.src);
+                }
+            });
+        }
+    });
+
+    // Видео в карусели
+    document.querySelectorAll('.carousel-slide video').forEach(video => {
+        if (!video.dataset.clickBound) {
+            video.dataset.clickBound = '1';
+            video.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (typeof openFullMedia === 'function') {
+                    openFullMedia(video.src, 'video');
+                }
+            });
+        }
+    });
+
+    // Одиночные изображения поста (не в карусели)
+    document.querySelectorAll('.postBodyImage').forEach(img => {
+        if (!img.dataset.clickBound) {
+            img.dataset.clickBound = '1';
+            img.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (typeof openFullMedia === 'function') {
+                    openFullMedia(img.src, 'image');
+                }
+            });
+        }
+    });
+}
 
     async function init() {
         state.userId = window.currentUserId;

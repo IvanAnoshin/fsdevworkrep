@@ -1,101 +1,66 @@
 <?php
-session_start();
+require_once __DIR__ . '/kopilot/kopilot_init.php';
+require_auth();
 
-// Проверяем авторизацию
-if (!isset($_SESSION['user_id'])) {
+$user = find('users', $_SESSION['user_id']);
+if (!$user) {
     header('Location: register.php');
     exit;
 }
-
-$dbHost = 'localhost';
-$dbName = 'fsdb';
-$dbUser = 'root';
-$dbPass = '';
-$dbCharset = 'utf8mb4';
 
 $errors = [];
 
 // Если форма отправлена
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    
-    // --- ШАГ 2: Обработка нажатия кнопки "Завершить" ---
-    if (isset($_POST['action']) && $_POST['action'] === 'finish') {
-        unset($_SESSION['show_passport']); // Сбрасываем флаг
-        header('Location: profile.php');   // Редирект в профиль
+    // CSRF проверка
+    if (!hash_equals(csrf_token(), $_POST['_csrf'] ?? '')) {
+        $errors['csrf'] = 'Недействительный CSRF-токен';
+    } elseif (isset($_POST['action']) && $_POST['action'] === 'finish') {
+        // Шаг 2: завершение — скрываем паспорт и переходим в профиль
+        unset($_SESSION['show_passport']);
+        header('Location: profile.php');
         exit;
-    }
+    } else {
+        // Шаг 1: сохранение секретного вопроса
+        $secret = $_POST['secret_question'] ?? '';
 
-    // --- ШАГ 1: Обработка секретного вопроса ---
-    $secret = $_POST['secret_question'] ?? '';
+        if ($secret === '') {
+            $errors['secret_question'] = 'Введите секретный вопрос';
+        } elseif (mb_strlen($secret) < 4) {
+            $errors['secret_question'] = 'Секретный вопрос должен содержать минимум 4 символа';
+        }
 
-    // Валидация
-    if ($secret === '') {
-        $errors['secret_question'] = 'Введите секретный вопрос';
-    } elseif (mb_strlen($secret) < 4) {
-        $errors['secret_question'] = 'Секретный вопрос должен содержать минимум 4 символа';
-    }
-
-    if (empty($errors)) {
-        try {
-            $pdo = new PDO(
-                "mysql:host=$dbHost;dbname=$dbName;charset=$dbCharset",
-                $dbUser,
-                $dbPass,
-                [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                    PDO::ATTR_EMULATE_PREPARES => false,
-                ]
-            );
+        if (empty($errors)) {
             $hashedSecret = password_hash($secret, PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare("UPDATE users SET secret_question = ? WHERE id = ?");
-            $stmt->execute([$hashedSecret, $_SESSION['user_id']]);
+            update('users', $_SESSION['user_id'], ['secret_question' => $hashedSecret]);
 
             // Успех: устанавливаем флаг для показа паспорта
             $_SESSION['show_passport'] = true;
-            
-            // Редирект на эту же страницу (PRG паттерн)
+            // Редирект на эту же страницу (PRG)
             header('Location: 2fa.php');
             exit;
-
-        } catch (PDOException $e) {
-            $errors['db'] = 'Ошибка базы данных. Попробуйте позже.';
         }
     }
 
-    // Сохраняем ошибки для отображения
-    $_SESSION['errors'] = $errors;
+    // Если были ошибки — сохраняем их во флеш и редиректим
+    flash('errors', $errors);
     header('Location: 2fa.php');
     exit;
 }
 
-$errors = $_SESSION['errors'] ?? [];
-unset($_SESSION['errors']);
+// Получаем ошибки из флеша
+$errors = flash('errors') ?? [];
 
-// Проверяем, нужно ли показывать паспорт (перешли ли мы на Шаг 2)
+// Проверяем, нужно ли показывать паспорт (шаг 2)
 $showPassport = $_SESSION['show_passport'] ?? false;
 
-// Получаем паспорт из БД
+// Получаем сырой паспорт из базы (для показа)
 $rawPassport = 'Недоступен';
-try {
-    $pdo = new PDO(
-        "mysql:host=$dbHost;dbname=$dbName;charset=$dbCharset",
-        $dbUser,
-        $dbPass,
-        [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ]
-    );
-    $stmt = $pdo->prepare("SELECT passport_raw FROM users WHERE id = ?");
-    $stmt->execute([$_SESSION['user_id']]);
-    $user = $stmt->fetch();
-    if ($user && !empty($user['passport_raw'])) {
-        $rawPassport = $user['passport_raw'];
-    }
-} catch (PDOException $e) {
-    // Тихо игнорируем ошибки БД
+$stmt = db()->prepare("SELECT passport_raw FROM users WHERE id = ?");
+$stmt->execute([$_SESSION['user_id']]);
+$row = $stmt->fetch();
+if ($row && !empty($row['passport_raw'])) {
+    $rawPassport = $row['passport_raw'];
 }
 ?>
 <!DOCTYPE html>
@@ -103,7 +68,7 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Двухфакторная авторизация</title>
+    <title>Двухфакторная авторизация — Friendscape</title>
     <link rel="stylesheet" href="css/main.css">
     <style>
         .passportNotice {
@@ -183,6 +148,7 @@ try {
             <p style="font-size: 1.2em; color: black; text-align: center; margin-bottom: 10px;">Мой секрет, который я не выдам никому</p>
             
             <form class="secretAnswerForm step-container" method="post" action="2fa.php">
+                <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
                 <input 
                     type="password" 
                     name="secret_question" 
@@ -191,10 +157,10 @@ try {
                     style="width: 100%; box-sizing: border-box;"
                 >
                 <?php if (isset($errors['secret_question'])): ?>
-                    <span class="error-message"><?= htmlspecialchars($errors['secret_question']) ?></span>
+                    <span class="error-message"><?= esc($errors['secret_question']) ?></span>
                 <?php endif; ?>
-                <?php if (isset($errors['db'])): ?>
-                    <span class="error-message"><?= htmlspecialchars($errors['db']) ?></span>
+                <?php if (isset($errors['csrf'])): ?>
+                    <span class="error-message"><?= esc($errors['csrf']) ?></span>
                 <?php endif; ?>
                 <button type="submit" class="btn-action">Далее</button>
             </form>
@@ -203,12 +169,13 @@ try {
             <!-- ================= ШАГ 2: Паспорт и Завершение ================= -->
             <div class="passportNotice">
                 <p class="passportNotice__label">🔑 Ваш Friendscape Паспорт</p>
-                <p id="passport-display" class="passportNotice__value"><?= htmlspecialchars($rawPassport) ?></p>
+                <p id="passport-display" class="passportNotice__value"><?= esc($rawPassport) ?></p>
                 <p class="passportNotice__hint">Сохраните его в надёжном месте — он понадобится для восстановления доступа к аккаунту</p>
                 <button type="button" onclick="copyPassport()" class="btn-action" id="copy-passport-btn">Скопировать</button>
             </div>
             
             <form method="post" action="2fa.php" class="step-container">
+                <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
                 <input type="hidden" name="action" value="finish">
                 <button type="submit" class="btn-action btn-finish">Завершить</button>
             </form>

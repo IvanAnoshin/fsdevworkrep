@@ -13,39 +13,31 @@ if (!$profileUser) {
     exit;
 }
 
-// Функция склонения для счётчика друзей
+$currentUserId = (int)$currentUser['id'];
+
 function declension($number, $titles) {
     $cases = [2, 0, 1, 1, 1, 2];
     return $titles[($number % 100 > 4 && $number % 100 < 20) ? 2 : $cases[($number % 10 < 5) ? $number % 10 : 5]];
 }
 
-/**
-* Возвращает человекочитаемую строку "когда" был создан пост.
-*/
-function timeAgo(string $datetime): string {
-    $time = strtotime($datetime);
-    if (!$time) return '';
-    $diff = time() - $time;
-    if ($diff < 60)       return 'только что';
-    if ($diff < 3600)     return floor($diff / 60) . ' мин. назад';
-    if ($diff < 86400)    return floor($diff / 3600) . ' ч. назад';
-    if ($diff < 172800)   return 'вчера';
-    if ($diff < 604800)   return floor($diff / 86400) . ' дн. назад';
-    $months = ['янв.', 'фев.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сен.', 'окт.', 'ноя.', 'дек.'];
-    return date('j', $time) . ' ' . $months[(int)date('n', $time) - 1] . ' ' . date('Y', $time);
+// --- Защита от пустых/нулевых значений + автозамена 'all' на 'public' ---
+function getPrivacy($user, $field, $default = 'public') {
+    $val = $user[$field] ?? null;
+    if ($val === null || $val === '') {
+        return $default;
+    }
+    // 'all' допустим только для сообщений, для остальных полей он идентичен 'public'
+    if ($val === 'all' && $field !== 'privacy_messages') {
+        return 'public';
+    }
+    return $val;
 }
 
-/**
-* Преобразует хештеги в тексте в кликабельные ссылки.
-*/
-function renderHashtags(string $text): string {
-    $escaped = esc($text);
-    return preg_replace(
-        '/#([\w\p{L}]+)/u',
-        '<a href="search.php?q=%23$1" class="hashtag-link">#$1</a>',
-        $escaped
-    );
-}
+$privacyMessages = getPrivacy($profileUser, 'privacy_messages', 'all');
+$privacyAlbums   = getPrivacy($profileUser, 'privacy_albums', 'public');
+$privacyInfo     = getPrivacy($profileUser, 'privacy_info', 'public');
+$privacyComments = getPrivacy($profileUser, 'privacy_comments', 'public');
+$privacyPosts    = getPrivacy($profileUser, 'privacy_posts', 'public');
 
 // Статус дружбы
 $stmt = db()->prepare(
@@ -53,28 +45,41 @@ $stmt = db()->prepare(
     (requester_id = ? AND addressee_id = ?) OR
     (requester_id = ? AND addressee_id = ?)"
 );
-$stmt->execute([$currentUser['id'], $profileUser['id'], $profileUser['id'], $currentUser['id']]);
+$stmt->execute([$currentUserId, $profileUser['id'], $profileUser['id'], $currentUserId]);
 $friendship = $stmt->fetch();
 $isFriend = $friendship && $friendship['status'] === 'accepted';
 $friendshipRequesterId = $isFriend ? $friendship['requester_id'] : null;
 
-// Приватность постов
-$privacyPosts = $profileUser['privacy_posts'] ?? 'all';
-$showPosts = $privacyPosts === 'friends' ? $isFriend : ($privacyPosts !== 'self');
+// Вычисление прав
+$canMessage = true;
+if ($privacyMessages === 'nobody') {
+    $canMessage = false;
+} elseif ($privacyMessages === 'friends' && !$isFriend) {
+    $canMessage = false;
+}
+
+$showAlbums = ($privacyAlbums === 'public') || ($privacyAlbums === 'friends' && $isFriend);
+$showInfo   = ($privacyInfo === 'public')   || ($privacyInfo === 'friends' && $isFriend);
+$canComment = ($privacyComments === 'public') || ($privacyComments === 'friends' && $isFriend);
+$showPosts  = $privacyPosts === 'friends' ? $isFriend : ($privacyPosts !== 'self');
+$showBio    = $showInfo;
+$showFriends = ($privacyInfo !== 'self');
 
 // --------------------- ВЫБОРКА ПОСТОВ ---------------------
 $stmt = db()->prepare("
-    SELECT p.*,
+    SELECT p.*, u.first_name, u.last_name, u.avatar,
     (SELECT GROUP_CONCAT(CONCAT(pm.id, '|', pm.file_url, '|', pm.media_type) SEPARATOR ',')
     FROM post_media pm
     WHERE pm.post_id = p.id) AS media_list
     FROM posts p
+    JOIN users u ON u.id = p.user_id
     WHERE p.user_id = ?
     ORDER BY p.created_at DESC
     LIMIT 10
 ");
 $stmt->execute([$profileId]);
 $posts = $stmt->fetchAll();
+
 foreach ($posts as &$post) {
     $post['media'] = [];
     if (!empty($post['media_list'])) {
@@ -88,10 +93,14 @@ foreach ($posts as &$post) {
         $post['media'][] = ['id' => 0, 'url' => $post['image'], 'type' => $oldType];
     }
     unset($post['media_list'], $post['image']);
+
+    $stmt2 = db()->prepare("SELECT reaction FROM post_reactions WHERE post_id = ? AND user_id = ?");
+    $stmt2->execute([$post['id'], $currentUserId]);
+    $react = $stmt2->fetch();
+    $post['user_reaction'] = $react ? $react['reaction'] : null;
 }
 unset($post);
 
-// Получаем список друзей просматриваемого пользователя
 $friends = select(
     "SELECT u.id, u.first_name, u.last_name, u.avatar
     FROM friendships f
@@ -101,17 +110,15 @@ $friends = select(
     [$profileId, $profileId, $profileId]
 );
 
-// Онлайн-статус
 $onlineText = 'Загрузка...';
 $onlineClass = 'profileStatus--offline';
 
-// Проверка поручительства (серверная)
 $alreadyEndorsed = false;
 if ($isFriend) {
     try {
         $endorsement = scalar(
             "SELECT COUNT(*) FROM dfsn_endorsements WHERE from_user_id = ? AND to_user_id = ?",
-            [$currentUser['id'], $profileUser['id']]
+            [$currentUserId, $profileUser['id']]
         );
         $alreadyEndorsed = (int)$endorsement > 0;
     } catch (\Exception $e) {
@@ -119,7 +126,6 @@ if ($isFriend) {
     }
 }
 
-// Первопроходец
 $isPioneer = ($profileUser['id'] ?? 0) <= 1000;
 
 $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) . ' - Friendscape';
@@ -132,222 +138,60 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
 <title><?= $pageTitle ?></title>
 <link rel="stylesheet" href="css/main.css">
 <style>
-.hashtag-link {
-    color: #3b5dd3;
-    text-decoration: none;
-    font-weight: 500;
-}
-.hashtag-link:hover {
-    text-decoration: underline;
-}
-#report-reason:focus {
-    border-color: #3b5dd3;
-    background: #fff;
-}
+.hashtag-link { color: #3b5dd3; text-decoration: none; font-weight: 500; }
+.hashtag-link:hover { text-decoration: underline; }
 .profileStatus { font-size:0.85rem; font-weight:500; padding:4px 12px; border-radius:20px; display:inline-flex; align-items:center; gap:6px; }
 .profileStatus--online { background:#ecfdf5; color:#10b981; }
 .profileStatus--recent { background:#fff7ed; color:#ea580c; }
 .profileStatus--offline { background:#f3f4f6; color:#6b7280; }
-.pioneer-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    margin-right: 6px;
-    color: #f59e0b;
-    flex-shrink: 0;
-    cursor: help;
-}
-.profile-status-container {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-}
-.post-time {
-    font-size: 0.85em;
-    color: #8b8fa3;
-    font-weight: 400;
-    margin-left: 6px;
-    white-space: nowrap;
-}
-.post-time::before {
-    content: "·";
-    margin-right: 6px;
-    color: #c5c9d6;
-}
-/* Карусель */
-.carousel-container {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 1 / 1;
-    overflow: hidden;
-    background: #000;
-}
-.carousel-track {
-    display: flex;
-    transition: transform 0.3s ease;
-    width: 100%;
-    height: 100%;
-}
-.carousel-slide {
-    flex: 0 0 100%;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-}
-.carousel-slide img,
-.carousel-slide video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    cursor: pointer;
-    display: block;
-}
-.carousel-prev,
-.carousel-next {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    background: rgba(0,0,0,0.6);
-    border: none;
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 2;
-    transition: background 0.2s;
-    padding: 0;
-    opacity: 0;
-}
-.carousel-container:hover .carousel-prev,
-.carousel-container:hover .carousel-next {
-    opacity: 1;
-}
-.carousel-prev:hover,
-.carousel-next:hover {
-    background: rgba(0,0,0,0.9);
-}
-.carousel-prev { left: 10px; }
-.carousel-next { right: 10px; }
-.carousel-prev svg,
-.carousel-next svg {
-    width: 24px;
-    height: 24px;
-    stroke: white;
-    stroke-width: 2;
-    fill: none;
-}
-.carousel-dots {
-    position: absolute;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 8px;
-    z-index: 2;
-}
-.carousel-dot {
-    width: 8px;
-    height: 8px;
-    background: rgba(255,255,255,0.5);
-    border-radius: 50%;
-    border: none;
-    cursor: pointer;
-    padding: 0;
-}
-.carousel-dot.active {
-    background: white;
-}
-/* Полноэкранный просмотр */
-.media-fullscreen {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0);
-    z-index: 10001;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background 0.3s ease;
-}
-.media-fullscreen.visible {
-    background: rgba(0, 0, 0, 0.95);
-}
-.media-fullscreen .media-content {
-    max-width: 90%;
-    max-height: 90%;
-    object-fit: contain;
-    opacity: 0;
-    transform: scale(0.9);
-    transition: opacity 0.3s ease, transform 0.3s ease;
-}
-.media-fullscreen.visible .media-content {
-    opacity: 1;
-    transform: scale(1);
-}
-.media-fullscreen .close-btn {
-    position: absolute;
-    top: 20px;
-    right: 30px;
-    font-size: 40px;
-    color: #fff;
-    cursor: pointer;
-    font-family: sans-serif;
-    z-index: 10002;
-    opacity: 0;
-    transition: opacity 0.2s ease 0.1s;
-}
-.media-fullscreen.visible .close-btn {
-    opacity: 1;
-}
-/* ===== МОБИЛЬНЫЕ ИСПРАВЛЕНИЯ ===== */
+.pioneer-badge { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-right: 6px; color: #f59e0b; flex-shrink: 0; cursor: help; }
+.profile-status-container { display: inline-flex; align-items: center; gap: 4px; }
+.post-time { font-size: 0.85em; color: #8b8fa3; font-weight: 400; margin-left: 6px; white-space: nowrap; }
+.post-time::before { content: "·"; margin-right: 6px; color: #c5c9d6; }
+.carousel-container { aspect-ratio: 1 / 1; overflow: hidden; background: #000; }
+.carousel-track { display: flex; transition: transform 0.3s ease; width: 100%; height: 100%; }
+.carousel-slide { flex: 0 0 100%; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.carousel-slide img, .carousel-slide video { width: 100%; height: 100%; object-fit: cover; cursor: pointer; }
+.carousel-prev, .carousel-next { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.6); border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 2; transition: background 0.2s; padding: 0; opacity: 0; }
+.carousel-container:hover .carousel-prev, .carousel-container:hover .carousel-next { opacity: 1; }
+.carousel-prev:hover, .carousel-next:hover { background: rgba(0,0,0,0.9); }
+.carousel-prev { left: 10px; } .carousel-next { right: 10px; }
+.carousel-prev svg, .carousel-next svg { width: 24px; height: 24px; stroke: white; stroke-width: 2; fill: none; }
+.carousel-dots { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 2; }
+.carousel-dot { width: 8px; height: 8px; background: rgba(255,255,255,0.5); border-radius: 50%; border: none; cursor: pointer; padding: 0; }
+.carousel-dot.active { background: white; }
+.media-fullscreen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0); z-index: 10001; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.3s ease; }
+.media-fullscreen.visible { background: rgba(0,0,0,0.95); }
+.media-fullscreen .media-content { max-width: 90%; max-height: 90%; object-fit: contain; opacity: 0; transform: scale(0.9); transition: opacity 0.3s ease, transform 0.3s ease; }
+.media-fullscreen.visible .media-content { opacity: 1; transform: scale(1); }
+.media-fullscreen .close-btn { position: absolute; top: 20px; right: 30px; font-size: 40px; color: #fff; cursor: pointer; font-family: sans-serif; z-index: 10002; opacity: 0; transition: opacity 0.2s ease 0.1s; }
+.media-fullscreen.visible .close-btn { opacity: 1; }
 @media (max-width: 767px) {
-    .mainArea {
-        margin-left: 0 !important;
-        padding: 10px !important;
-    }
-    .profileCard {
-        width: 100% !important;
-        max-width: 100% !important;
-    }
-    .post {
-        width: 100% !important;
-        max-width: 100% !important;
-    }
-    .carousel-container {
-        aspect-ratio: auto !important;
-    }
-    .carousel-slide img,
-    .carousel-slide video {
-        height: auto !important;
-        object-fit: contain !important;
-    }
+    .mainArea { margin-left: 0 !important; padding: 10px !important; }
+    .profileCard { width: 100% !important; max-width: 100% !important; }
+    .post { width: 100% !important; max-width: 100% !important; }
 }
+html body #comments-modal .modal-container { max-width: 480px !important; width: auto !important; margin-left: auto; margin-right: auto; }
+html body .comment-text { font-size: 0.8em !important; }
+#section-friends .friends-grid { display: flex; flex-direction: column; gap: 0; }
+#section-friends .friend-card { border-bottom: 1px solid #eef0f5; margin: 0; border-radius: 0; background: #fff; padding: 10px 12px; }
+#section-friends .friend-card:last-child { border-bottom: none; }
 </style>
 </head>
 <body>
+<!-- ОТЛАДКА: реальные значения приватности -->
+<!-- privacy_messages = <?= $privacyMessages ?>, privacy_albums = <?= $privacyAlbums ?>, privacy_info = <?= $privacyInfo ?>, privacy_comments = <?= $privacyComments ?>, privacy_posts = <?= $privacyPosts ?> -->
+<!-- isFriend = <?= $isFriend ? 'true' : 'false' ?>, showFriends = <?= $showFriends ? 'true' : 'false' ?>, showAlbums = <?= $showAlbums ? 'true' : 'false' ?>, showInfo = <?= $showInfo ? 'true' : 'false' ?> -->
+
 <?php require_once "components/header.php"; ?>
 <div class="mainArea">
 <div class="profileContainer">
-<!-- Карточка профиля -->
 <div class="profileCard">
 <div class="profileAvatar">
 <?php if (!empty($profileUser['avatar'])): ?>
 <img src="<?= esc($profileUser['avatar']) ?>" alt="">
 <?php else: ?>
-<span class="accountAvatarPlaceholder">
-<?= esc(mb_substr($profileUser['first_name'] ?? '', 0, 1) . mb_substr($profileUser['last_name'] ?? '', 0, 1)) ?>
-</span>
+<span class="accountAvatarPlaceholder"><?= esc(mb_substr($profileUser['first_name'] ?? '', 0, 1) . mb_substr($profileUser['last_name'] ?? '', 0, 1)) ?></span>
 <?php endif; ?>
 </div>
 <div class="profileCardInfo">
@@ -368,8 +212,12 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
 <?php endif; ?>
 <span id="profile-status-text" class="profileStatus <?= $onlineClass ?>"><?= $onlineText ?></span>
 </span>
+<?php if ($showBio): ?>
 <button class="btn btn--more" id="toggle-bio-btn" onclick="toggleBio()">Больше</button>
+<?php endif; ?>
 </div>
+
+<?php if ($showBio): ?>
 <div class="bio-wrapper" id="bio-wrapper">
 <div class="bio">
 <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="bioLabel">О себе:</span><span class="bioValue"><?= esc($profileUser['about'] ?? '') ?></span></div>
@@ -379,10 +227,10 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
 <div class="bioItem"><span class="bioIcon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg></span><span class="bioLabel">Мне не нравится:</span><span class="bioValue"><?= esc($profileUser['dislikes'] ?? '') ?></span></div>
 </div>
 </div>
+<?php endif; ?>
 </div>
 </div>
 
-<!-- Кнопки дружбы и сообщение -->
 <div class="profileActionsUnderAvatar" style="margin-top: 16px; display: flex; gap: 8px; justify-content: center;">
 <?php if (!$friendship): ?>
 <button class="btn btn--primary" id="add-friend-btn" data-user-id="<?= $profileUser['id'] ?>">
@@ -392,7 +240,7 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
 Добавить в друзья
 </button>
 <?php elseif ($friendship['status'] === 'pending'): ?>
-<?php if ($friendship['requester_id'] == $currentUser['id']): ?>
+<?php if ($friendship['requester_id'] == $currentUserId): ?>
 <span class="statusBadge">Заявка отправлена</span>
 <?php else: ?>
 <button class="btn btn--success" id="accept-friend-btn" data-user-id="<?= $profileUser['id'] ?>">Принять</button>
@@ -408,12 +256,14 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
 Вы друзья
 </button>
 <?php endif; ?>
-<button class="btn btn--secondary" onclick="window.location='messenger.php?chat_id=<?= getOrCreateChat($currentUser['id'], $profileUser['id']) ?>'">
+<?php if ($canMessage): ?>
+<button class="btn btn--secondary" onclick="window.location='messenger.php?chat_id=<?= getOrCreateChat($currentUserId, $profileUser['id']) ?>'">
 <span class="Menu__icon" style="background: white; color: #3b5dd3;">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
 </span>
 Написать сообщение
 </button>
+<?php endif; ?>
 </div>
 
 <div class="profileNavigation">
@@ -430,89 +280,8 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
 <div class="no-posts-placeholder" style="text-align:center;padding:40px 20px;"><p style="color:#8b8fa3;">Нет публикаций</p></div>
 <?php else: ?>
 <?php foreach ($posts as $post): ?>
-<div class="post" data-post-id="<?= $post['id'] ?>" data-author-id="<?= $post['user_id'] ?>">
-<div class="postHeader">
-<img class="opPicture" src="<?= esc($profileUser['avatar'] ?? '') ?>" alt="">
-<div class="opLabel">
-<a href=""><?= esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) ?></a>
-<span class="post-time"><?= timeAgo($post['created_at']) ?></span>
-</div>
-<div class="postOptions">
-<button>
-<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
-</button>
-</div>
-</div>
-<div class="postBody">
-<?php if (!empty($post['media'])): ?>
-<div class="carousel-container">
-<div class="carousel-track">
-<?php foreach ($post['media'] as $media): ?>
-<div class="carousel-slide">
-<?php if ($media['type'] === 'video'): ?>
-<video controls src="<?= esc($media['url']) ?>" preload="metadata"></video>
-<?php else: ?>
-<img src="<?= esc($media['url']) ?>" alt="">
-<?php endif; ?>
-</div>
-<?php endforeach; ?>
-</div>
-<?php if (count($post['media']) > 1): ?>
-<button class="carousel-prev">
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-<polyline points="15 18 9 12 15 6"/>
-</svg>
-</button>
-<button class="carousel-next">
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-<polyline points="9 18 15 12 9 6"/>
-</svg>
-</button>
-<div class="carousel-dots"></div>
-<?php endif; ?>
-</div>
-<?php endif; ?>
-<?php if (!empty($post['content'])): ?>
-<div class="postBodyText"><?= renderHashtags($post['content']) ?></div>
-<?php endif; ?>
-</div>
-<div class="postFooter">
-<div class="postReactions">
-<button class="likeButton" data-post-id="<?= $post['id'] ?>">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-</svg>
-</span>
-</button>
-<p class="positiveCounter"><?= formatCount($post['likes_count']) ?></p>
-<button class="dislikeButton" data-post-id="<?= $post['id'] ?>">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<line x1="5" y1="12" x2="19" y2="12"/>
-</svg>
-</span>
-</button>
-<p class="negativeCounter"><?= formatCount($post['dislikes_count']) ?></p>
-</div>
-<div class="postActions">
-<button class="commentSheet" data-post-id="<?= $post['id'] ?>">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-</svg>
-</span>
-</button>
-<button class="sharePost" data-post-id="<?= $post['id'] ?>">
-<span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98"/><path d="M15.41 6.51l-6.82 3.98"/>
-</svg>
-</span>
-</button>
-</div>
-</div>
-</div>
+    <?php $canCommentPost = $canComment; ?>
+    <?php include __DIR__ . '/components/post.php'; ?>
 <?php endforeach; ?>
 <?php endif; ?>
 </div>
@@ -520,9 +289,11 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
 <div id="section-friends" style="display: none;">
 <div class="friends-header">
 <h3 style="margin:0; font-size:1.2rem;">Друзья <?= esc($profileUser['first_name']) ?></h3>
-<span class="friends-count"><?= count($friends) ?> <?= declension(count($friends), ['друг', 'друга', 'друзей']) ?></span>
+<span class="friends-count"><?= $showFriends ? count($friends) . ' ' . declension(count($friends), ['друг', 'друга', 'друзей']) : '' ?></span>
 </div>
-<?php if (empty($friends)): ?>
+<?php if (!$showFriends): ?>
+<div style="text-align:center;padding:40px 20px;"><p style="color:#8b8fa3;">Информация о друзьях скрыта</p></div>
+<?php elseif (empty($friends)): ?>
 <div style="text-align:center;padding:40px 20px;"><p style="color:#8b8fa3;">Нет друзей</p></div>
 <?php else: ?>
 <div class="friends-grid">
@@ -543,15 +314,20 @@ $pageTitle = esc($profileUser['first_name'] . ' ' . $profileUser['last_name']) .
 </div>
 
 <div class="facebookSection" style="display: none;">
-<div class="facebookLabel">
-<p>Фото <?= esc($profileUser['first_name']) ?></p>
-</div>
+<div class="facebookLabel"><p>Фото <?= esc($profileUser['first_name']) ?></p></div>
+<?php if (!$showAlbums): ?>
+<div style="text-align:center;padding:40px 20px;"><p style="color:#8b8fa3;">Фотоальбомы скрыты</p></div>
+<?php else: ?>
 <div id="photos-grid" class="facebook"></div>
+<?php endif; ?>
 </div>
 
 <div class="personalInfoSection" style="display: none;">
 <div class="editCard">
 <h3 class="accountTitle">Личная информация</h3>
+<?php if (!$showInfo): ?>
+<div style="text-align:center;padding:40px 20px;"><p style="color:#8b8fa3;">Личная информация скрыта</p></div>
+<?php else: ?>
 <div class="accountGroup">
 <?php
 $fields = [
@@ -605,8 +381,10 @@ if (!$hasData): ?>
 <p style="color:#8b8fa3;text-align:center;padding:20px;">Пользователь не заполнил личную информацию.</p>
 <?php endif; ?>
 </div>
+<?php endif; ?>
 </div>
 </div>
+
 </div>
 </div>
 
@@ -657,27 +435,29 @@ function toggleBio() {
     }
 }
 
-function esc(str) {
-    if (str == null) return '';
-    return String(str).replace(/[&<>]/g, function(m) {
-        if (m === '&') return '&amp;';
-        if (m === '<') return '&lt;';
-        if (m === '>') return '&gt;';
-        return m;
-    });
-}
-
+// ---------- МЕНЮ ПОСТА ----------
 const postMenu = document.createElement('div');
 postMenu.className = 'post-actions-menu';
 document.body.appendChild(postMenu);
+let currentOpenMenuPostId = null;
 
-function hidePostMenu() { postMenu.classList.remove('active'); }
+function hidePostMenu() {
+    postMenu.classList.remove('active');
+    currentOpenMenuPostId = null;
+}
 
 document.addEventListener('click', (e) => {
     if (!postMenu.contains(e.target) && !e.target.closest('.postOptions button')) hidePostMenu();
 });
 
 function showPostMenu(button, postId, authorId) {
+    if (currentOpenMenuPostId === postId) {
+        hidePostMenu();
+        return;
+    }
+    hidePostMenu();
+    currentOpenMenuPostId = postId;
+
     const rect = button.getBoundingClientRect();
     postMenu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
     postMenu.style.left = (rect.right + window.scrollX - 200) + 'px';
@@ -709,401 +489,70 @@ function showPostMenu(button, postId, authorId) {
     });
 }
 
-function showReportModal(targetId, type) {
-    const existing = document.querySelector('.report-modal-overlay');
-    if (existing) existing.remove();
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay report-modal-overlay';
-    overlay.style.display = 'flex';
-    overlay.innerHTML = `
-        <div class="modal-container" style="max-width:440px; padding:28px 24px;">
-            <span class="modal-close" style="float:right; cursor:pointer; font-size:1.5em; line-height:1;">&times;</span>
-            <h3 style="margin:0 0 12px; font-size:1.3em; display:flex; align-items:center; gap:8px;">
-                <span style="background:#fee2e2; color:#b91c1c; padding:6px; border-radius:8px;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
-                </span>
-                Жалоба
-            </h3>
-            <p style="color:#4b5563; margin:0 0 16px;">Опишите причину. Мы рассмотрим обращение в ближайшее время.</p>
-            <textarea id="report-reason" placeholder="Что случилось?" style="width:100%; padding:14px; border-radius:14px; border:1px solid #e5e7eb; background:#f9fafb; font-family:inherit; font-size:0.95em; resize:vertical; min-height:110px; box-sizing:border-box; outline:none; transition:border-color 0.2s;"></textarea>
-            <div style="display:flex; gap:12px; justify-content:flex-end; margin-top:20px;">
-                <button class="btn btn--secondary" id="report-cancel" style="padding:10px 20px; border-radius:10px; background:#f3f4f6; border:none; cursor:pointer;">Отмена</button>
-                <button class="btn btn--primary" id="report-submit" style="padding:10px 20px; border-radius:10px; background:#3b5dd3; color:#fff; border:none; cursor:pointer;">Отправить</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-    requestAnimationFrame(() => overlay.classList.add('active'));
-    const close = () => {
-        overlay.classList.remove('active');
-        setTimeout(() => overlay.remove(), 300);
+// ---------- ПОЛНОЭКРАННЫЙ ПРОСМОТР ----------
+function openFullMedia(src, type) {
+    const viewer = document.createElement('div');
+    viewer.className = 'media-fullscreen';
+    const closeBtn = document.createElement('div');
+    closeBtn.className = 'close-btn';
+    closeBtn.innerHTML = '&times;';
+    let media;
+    if (type === 'image') {
+        media = document.createElement('img');
+        media.src = src;
+        media.className = 'media-content';
+    } else {
+        media = document.createElement('video');
+        media.src = src;
+        media.controls = true;
+        media.autoplay = true;
+        media.className = 'media-content';
+    }
+    viewer.appendChild(media);
+    viewer.appendChild(closeBtn);
+    const removeOverlay = () => {
+        viewer.classList.remove('visible');
+        setTimeout(() => {
+            if (viewer.parentNode) viewer.remove();
+        }, 300);
     };
-    overlay.querySelector('.modal-close').addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    overlay.querySelector('#report-cancel').addEventListener('click', close);
-    overlay.querySelector('#report-submit').addEventListener('click', async () => {
-        const reason = overlay.querySelector('#report-reason').value.trim();
-        if (!reason) {
-            kop.flash('Укажите причину жалобы');
-            return;
-        }
-        try {
-            const res = await fetch('/api/report', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': window.csrfToken
-                },
-                body: JSON.stringify({ target_id: targetId, type: type, reason: reason })
+    closeBtn.onclick = removeOverlay;
+    viewer.onclick = (e) => {
+        if (e.target === viewer) removeOverlay();
+    };
+    document.body.appendChild(viewer);
+    requestAnimationFrame(() => {
+        viewer.classList.add('visible');
+    });
+}
+
+function bindMediaClicks() {
+    document.querySelectorAll('.carousel-slide img').forEach(img => {
+        if (!img.dataset.clickBound) {
+            img.dataset.clickBound = '1';
+            img.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openFullMedia(img.src, 'image');
             });
-            const data = await res.json();
-            if (res.ok) {
-                kop.flash('Жалоба отправлена');
-            } else {
-                kop.flash(data.error || 'Ошибка при отправке жалобы');
-            }
-        } catch (e) {
-            kop.flash('Ошибка соединения');
         }
-        close();
     });
-    setTimeout(() => overlay.querySelector('#report-reason').focus(), 100);
-}
-
-function attachReactionHandlers() {
-    document.querySelectorAll('.likeButton, .dislikeButton').forEach(btn => {
-        if (btn.dataset.handlerAttached) return;
-        btn.dataset.handlerAttached = '1';
-        btn.addEventListener('click', async function() {
-            const postId = this.dataset.postId;
-            const type = this.classList.contains('likeButton') ? 'like' : 'dislike';
-            const res = await kop.post(`/api/posts/${type}`, { post_id: postId });
-            if (res.success) {
-                const postDiv = this.closest('.post');
-                postDiv.querySelector('.positiveCounter').textContent = formatCount(res.likes_count);
-                postDiv.querySelector('.negativeCounter').textContent = formatCount(res.dislikes_count);
-                postDiv.querySelector('.likeButton').classList.toggle('active', res.user_liked);
-                postDiv.querySelector('.dislikeButton').classList.toggle('active', res.user_disliked);
-            }
-        });
-    });
-}
-
-function attachCommentHandler() {
-    document.querySelectorAll('.commentSheet').forEach(btn => {
-        if (btn.dataset.commentHandlerAttached) return;
-        btn.dataset.commentHandlerAttached = '1';
-        btn.addEventListener('click', () => openCommentsModal(btn.dataset.postId));
-    });
-}
-
-async function openCommentsModal(postId) {
-    const modal = document.getElementById('comments-modal');
-    const postContainer = document.getElementById('modal-post-container');
-    const commentsList = document.getElementById('comments-list');
-    const originalPost = document.querySelector(`.post[data-post-id="${postId}"]`);
-    if (originalPost) {
-        const body = originalPost.querySelector('.postBody');
-        postContainer.innerHTML = body ? body.outerHTML : '<p>Пост не найден</p>';
-    } else {
-        postContainer.innerHTML = '<p>Пост не найден</p>';
-    }
-    try {
-        const data = await kop.get(`/api/posts/${postId}/comments`);
-        if (data.comments && data.comments.length) {
-            commentsList.innerHTML = data.comments.map(c => {
-                const initials = (c.first_name?.charAt(0)||'')+(c.last_name?.charAt(0)||'');
-                return `
-                    <div class="comment-item">
-                        <div class="comment-avatar">${c.avatar ? `<img src="${c.avatar}">` : `<span>${initials}</span>`}</div>
-                        <div class="comment-content">
-                            <div class="comment-author"><a href="user.php?id=${c.user_id}">${c.first_name} ${c.last_name}</a></div>
-                            <div class="comment-text">${c.content}</div>
-                            <div class="comment-date">${new Date(c.created_at).toLocaleString()}</div>
-                        </div>
-                    </div>`;
-            }).join('');
-        } else {
-            commentsList.innerHTML = '<p class="no-comments">Нет комментариев</p>';
-        }
-    } catch(e) {
-        commentsList.innerHTML = '<p class="error">Ошибка загрузки</p>';
-    }
-    document.getElementById('comment-send-btn').onclick = async () => {
-        const input = document.getElementById('comment-input');
-        const content = input.value.trim();
-        if (!content) return;
-        const resp = await kop.post(`/api/posts/${postId}/comments`, { content });
-        if (resp.success) {
-            const c = resp.comment;
-            const initials = (c.first_name?.charAt(0)||'')+(c.last_name?.charAt(0)||'');
-            const newComment = `
-                <div class="comment-item">
-                    <div class="comment-avatar">${c.avatar ? `<img src="${c.avatar}">` : `<span>${initials}</span>`}</div>
-                    <div class="comment-content">
-                        <div class="comment-author"><a href="user.php?id=${c.user_id}">${c.first_name} ${c.last_name}</a></div>
-                        <div class="comment-text">${c.content}</div>
-                        <div class="comment-date">${new Date(c.created_at).toLocaleString()}</div>
-                    </div>
-                </div>`;
-            if (commentsList.querySelector('.no-comments')) commentsList.innerHTML = '';
-            commentsList.insertAdjacentHTML('afterbegin', newComment);
-            input.value = '';
-        }
-    };
-    modal.style.display = 'flex';
-    modal.classList.add('active');
-    document.body.classList.add('no-scroll');
-}
-
-function closeModal() {
-    const modal = document.getElementById('comments-modal');
-    if (modal) {
-        modal.classList.remove('active');
-        modal.style.display = 'none';
-        document.body.classList.remove('no-scroll');
-    }
-}
-
-document.getElementById('modal-close').addEventListener('click', closeModal);
-document.getElementById('comments-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
-
-function attachShareButtons() {
-    document.querySelectorAll('.sharePost').forEach(btn => {
-        if (btn.dataset.shareAttached) return;
-        btn.dataset.shareAttached = '1';
-        btn.addEventListener('click', e => {
-            e.stopPropagation();
-            openShareModal(btn.dataset.postId);
-        });
-    });
-}
-
-async function openShareModal(postId) {
-    const modal = document.getElementById('share-modal');
-    const chatList = document.getElementById('share-chat-list');
-    let chats = [];
-    try { const data = await kop.get('/api/chats'); chats = data.chats || []; } catch(e) {}
-    if (!chats.length) {
-        chatList.innerHTML = '<p style="color:#8b8fa3;text-align:center;padding:20px;">Нет активных чатов</p>';
-    } else {
-        chatList.innerHTML = chats.map(chat => `
-            <div class="share-chat-item" data-chat-id="${chat.chat_id}" data-other-user="${chat.other_user_id}"
-                style="display:flex;align-items:center;gap:12px;padding:12px;cursor:pointer;border-radius:12px;">
-                <img src="${chat.avatar||''}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">
-                <span>${chat.first_name} ${chat.last_name}</span>
-            </div>
-        `).join('');
-        chatList.querySelectorAll('.share-chat-item').forEach(item => {
-            item.addEventListener('click', async () => {
-                const receiverId = item.dataset.otherUser;
-                const postUrl = `${location.origin}/post.php?id=${postId}`;
-                await kop.post('/api/messages/send', { receiver_id: receiverId, content: postUrl });
-                kop.flash('Пост отправлен');
-                modal.classList.remove('active');
-                modal.style.display = 'none';
+    document.querySelectorAll('.carousel-slide video').forEach(video => {
+        if (!video.dataset.clickBound) {
+            video.dataset.clickBound = '1';
+            video.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openFullMedia(video.src, 'video');
             });
-        });
-    }
-    modal.style.display = 'flex';
-    modal.classList.add('active');
-}
-
-document.getElementById('share-modal-close')?.addEventListener('click', () => {
-    const modal = document.getElementById('share-modal');
-    modal.classList.remove('active');
-    modal.style.display = 'none';
-});
-document.getElementById('share-modal')?.addEventListener('click', e => {
-    if (e.target === e.currentTarget) {
-        e.currentTarget.classList.remove('active');
-        e.currentTarget.style.display = 'none';
-    }
-});
-
-function showFriendActionsModal(friendId, requesterId) {
-    const alreadyEndorsed = document.getElementById('friend-actions-btn')?.dataset.alreadyEndorsed === '1';
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.style.display = 'flex';
-    let buttonsHtml = '';
-    if (alreadyEndorsed) {
-        buttonsHtml = `
-            <span style="color:#059669;font-weight:500;">✓ Вы уже поручились</span>
-            <button class="btn btn--danger" id="remove-friend-btn">Удалить из друзей</button>
-        `;
-    } else {
-        buttonsHtml = `
-            <button class="btn btn--success" id="vouch-btn">Поручиться</button>
-            <button class="btn btn--danger" id="remove-friend-btn">Удалить из друзей</button>
-        `;
-    }
-    overlay.innerHTML = `
-        <div class="modal-container" style="max-width:400px; padding:20px;">
-            <span class="modal-close" style="float:right; cursor:pointer;">&times;</span>
-            <h3 style="margin-top:0;">Управление дружбой</h3>
-            <p>Что вы хотите сделать?</p>
-            <div style="display:flex; gap:12px; justify-content:center; margin-top:20px;">
-                ${buttonsHtml}
-            </div>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-    setTimeout(() => overlay.classList.add('active'), 10);
-    const close = () => {
-        overlay.classList.remove('active');
-        setTimeout(() => overlay.remove(), 300);
-    };
-    overlay.querySelector('.modal-close').addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    const vouchBtn = overlay.querySelector('#vouch-btn');
-    if (vouchBtn) {
-        vouchBtn.addEventListener('click', async () => {
-            try {
-                const resp = await fetch('/api/dfsn/endorse', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': window.csrfToken
-                    },
-                    body: JSON.stringify({ user_id: friendId })
-                });
-                const data = await resp.json();
-                if (resp.ok) {
-                    kop.flash(data.message || 'Поручительство принято');
-                    const friendActionsBtn = document.getElementById('friend-actions-btn');
-                    if (friendActionsBtn) friendActionsBtn.dataset.alreadyEndorsed = '1';
-                    close();
-                } else {
-                    kop.flash(data.error || 'Ошибка поручительства');
-                }
-            } catch (e) {
-                kop.flash('Не удалось поручиться');
-            }
-        });
-    }
-    const removeBtn = overlay.querySelector('#remove-friend-btn');
-    if (removeBtn) {
-        removeBtn.addEventListener('click', async () => {
-            try {
-                const resp = await fetch('/api/friends/decline', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': window.csrfToken
-                    },
-                    body: JSON.stringify({ friend_id: friendId, requester_id: requesterId })
-                });
-                const data = await resp.json();
-                if (resp.ok) {
-                    kop.flash('Пользователь удалён из друзей');
-                    close();
-                    replaceFriendButtonWithAdd(friendId);
-                } else {
-                    kop.flash(data.error || 'Ошибка при удалении');
-                }
-            } catch (e) {
-                kop.flash('Ошибка соединения');
-            }
-        });
-    }
-}
-
-function replaceFriendButtonWithAdd(userId) {
-    const container = document.querySelector('.profileActionsUnderAvatar');
-    const oldBtn = document.getElementById('friend-actions-btn');
-    if (!oldBtn) return;
-    const newBtnHTML = `
-        <button class="btn btn--primary" id="add-friend-btn" data-user-id="${userId}">
-            <span class="Menu__icon" style="background: #e8e0fc; color: #7c3aed;">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-            </span>
-            Добавить в друзья
-        </button>
-    `;
-    oldBtn.insertAdjacentHTML('afterend', newBtnHTML);
-    oldBtn.remove();
-    const newBtn = document.getElementById('add-friend-btn');
-    if (newBtn) {
-        newBtn.addEventListener('click', async function() {
-            try {
-                await kop.post('/api/friends/add', { addressee_id: this.dataset.userId });
-                kop.flash('Заявка отправлена');
-                this.outerHTML = '<span class="statusBadge">Заявка отправлена</span>';
-            } catch(e) {
-                kop.flash('Ошибка');
-            }
-        });
-    }
-}
-
-const addBtn = document.getElementById('add-friend-btn');
-if (addBtn) addBtn.addEventListener('click', async () => {
-    try { await kop.post('/api/friends/add', { addressee_id: addBtn.dataset.userId }); location.reload(); }
-    catch(e) { kop.flash('Ошибка'); }
-});
-
-const acceptBtn = document.getElementById('accept-friend-btn');
-if (acceptBtn) acceptBtn.addEventListener('click', async () => {
-    try { await kop.post('/api/friends/accept', { requester_id: acceptBtn.dataset.userId }); location.reload(); }
-    catch(e) { kop.flash('Ошибка'); }
-});
-
-const declineBtn = document.getElementById('decline-friend-btn');
-if (declineBtn) declineBtn.addEventListener('click', async () => {
-    try { await kop.post('/api/friends/decline', { requester_id: declineBtn.dataset.userId }); location.reload(); }
-    catch(e) { kop.flash('Ошибка'); }
-});
-
-const friendActionsBtn = document.getElementById('friend-actions-btn');
-if (friendActionsBtn) {
-    friendActionsBtn.addEventListener('click', () => {
-        showFriendActionsModal(friendActionsBtn.dataset.friendId, friendActionsBtn.dataset.requesterId);
+        }
     });
-}
-
-const navBtns = document.querySelectorAll('.profileNavigation__btn');
-
-function setActiveTab(act) {
-    const noPostsPlaceholder = document.querySelector('.no-posts-placeholder');
-    document.querySelectorAll('.post').forEach(p => p.style.display = 'none');
-    document.querySelector('.facebookSection').style.display = 'none';
-    document.getElementById('section-friends').style.display = 'none';
-    document.querySelector('.personalInfoSection').style.display = 'none';
-    if (noPostsPlaceholder) noPostsPlaceholder.style.display = 'none';
-    if (act === 'posts') {
-        document.querySelectorAll('.post').forEach(p => p.style.display = '');
-        if (noPostsPlaceholder) noPostsPlaceholder.style.display = '';
-    } else if (act === 'friends') {
-        document.getElementById('section-friends').style.display = '';
-    } else if (act === 'photos') {
-        document.querySelector('.facebookSection').style.display = '';
-    } else if (act === 'info') {
-        document.querySelector('.personalInfoSection').style.display = '';
-    }
-    closeModal();
-}
-
-navBtns.forEach(btn => {
-    btn.addEventListener('click', function(e) {
-        e.preventDefault();
-        navBtns.forEach(b => b.classList.remove('profileNavigation__btn--active'));
-        this.classList.add('profileNavigation__btn--active');
-        setActiveTab(this.dataset.act);
-    });
-});
-
-setActiveTab('posts');
-
-function attachPostMenu() {
-    document.querySelectorAll('.postOptions button').forEach(btn => {
-        if (btn.dataset.menuAttached) return;
-        btn.dataset.menuAttached = '1';
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            const postDiv = this.closest('.post');
-            showPostMenu(this, postDiv.dataset.postId, postDiv.dataset.authorId);
-        });
+    document.querySelectorAll('.postBodyImage').forEach(img => {
+        if (!img.dataset.clickBound) {
+            img.dataset.clickBound = '1';
+            img.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openFullMedia(img.src, 'image');
+            });
+        }
     });
 }
 
@@ -1159,75 +608,339 @@ function initCarousel(container) {
     updateCarouselTransform();
 }
 
-// ---------- ПОЛНОЭКРАННЫЙ ПРОСМОТР ----------
-function openFullMedia(src, type) {
-    const viewer = document.createElement('div');
-    viewer.className = 'media-fullscreen';
-    const closeBtn = document.createElement('div');
-    closeBtn.className = 'close-btn';
-    closeBtn.innerHTML = '&times;';
-    let media;
-    if (type === 'image') {
-        media = document.createElement('img');
-        media.src = src;
-        media.className = 'media-content';
+function attachReactionHandlers() {
+    document.querySelectorAll('.likeButton, .dislikeButton').forEach(btn => {
+        if (btn.dataset.handlerAttached) return;
+        btn.dataset.handlerAttached = '1';
+        btn.addEventListener('click', async function() {
+            const postId = this.dataset.postId;
+            const type = this.classList.contains('likeButton') ? 'like' : 'dislike';
+            const res = await kop.post(`/api/posts/${type}`, { post_id: postId });
+            if (res.success) {
+                const postDiv = this.closest('.post');
+                postDiv.querySelector('.positiveCounter').textContent = formatCount(res.likes_count);
+                postDiv.querySelector('.negativeCounter').textContent = formatCount(res.dislikes_count);
+                postDiv.querySelector('.likeButton').classList.toggle('active', res.user_liked);
+                postDiv.querySelector('.dislikeButton').classList.toggle('active', res.user_disliked);
+            }
+        });
+    });
+}
+
+function attachCommentHandler() {
+    document.querySelectorAll('.commentSheet').forEach(btn => {
+        if (btn.dataset.commentHandlerAttached) return;
+        btn.dataset.commentHandlerAttached = '1';
+        btn.addEventListener('click', () => openCommentsModal(btn.dataset.postId));
+    });
+}
+
+async function openCommentsModal(postId) {
+    const modal = document.getElementById('comments-modal');
+    const postContainer = document.getElementById('modal-post-container');
+    const commentsList = document.getElementById('comments-list');
+    const originalPost = document.querySelector(`.post[data-post-id="${postId}"]`);
+    if (originalPost) {
+        const body = originalPost.querySelector('.postBody');
+        postContainer.innerHTML = body ? body.outerHTML : '<p>Пост не найден</p>';
     } else {
-        media = document.createElement('video');
-        media.src = src;
-        media.controls = true;
-        media.autoplay = true;
-        media.className = 'media-content';
+        postContainer.innerHTML = '<p>Пост не найден</p>';
     }
-    viewer.appendChild(media);
-    viewer.appendChild(closeBtn);
-    const removeOverlay = () => {
-        viewer.classList.remove('visible');
-        setTimeout(() => {
-            if (viewer.parentNode) viewer.remove();
-        }, 300);
+    try {
+        const data = await kop.get(`/api/posts/${postId}/comments`);
+        if (data.comments && data.comments.length) {
+            commentsList.innerHTML = data.comments.map(c => {
+                const initials = (c.first_name?.charAt(0)||'')+(c.last_name?.charAt(0)||'');
+                const avatarHtml = c.avatar
+                    ? `<img src="${kop.esc(c.avatar)}" alt="">`
+                    : `<span class="comment-avatar-placeholder">${kop.esc(initials)}</span>`;
+                return `
+                    <div class="comment-item">
+                        <div class="comment-avatar">${avatarHtml}</div>
+                        <div class="comment-content">
+                            <div class="comment-author"><a href="user.php?id=${c.user_id}">${kop.esc(c.first_name)} ${kop.esc(c.last_name)}</a></div>
+                            <div class="comment-text">${kop.esc(c.content)}</div>
+                            <div class="comment-date">${new Date(c.created_at).toLocaleString()}</div>
+                        </div>
+                    </div>`;
+            }).join('');
+        } else {
+            commentsList.innerHTML = '<p class="no-comments">Нет комментариев</p>';
+        }
+    } catch(e) {
+        commentsList.innerHTML = '<p class="error">Ошибка загрузки</p>';
+    }
+    document.getElementById('comment-send-btn').onclick = async () => {
+        const input = document.getElementById('comment-input');
+        const content = input.value.trim();
+        if (!content) return;
+        const resp = await kop.post(`/api/posts/${postId}/comments`, { content });
+        if (resp.success) {
+            const c = resp.comment;
+            const initials = (c.first_name?.charAt(0)||'')+(c.last_name?.charAt(0)||'');
+            const avatarHtml = c.avatar
+                ? `<img src="${kop.esc(c.avatar)}" alt="">`
+                : `<span class="comment-avatar-placeholder">${kop.esc(initials)}</span>`;
+            const newComment = `
+                <div class="comment-item">
+                    <div class="comment-avatar">${avatarHtml}</div>
+                    <div class="comment-content">
+                        <div class="comment-author"><a href="user.php?id=${c.user_id}">${kop.esc(c.first_name)} ${kop.esc(c.last_name)}</a></div>
+                        <div class="comment-text">${kop.esc(c.content)}</div>
+                        <div class="comment-date">${new Date(c.created_at).toLocaleString()}</div>
+                    </div>
+                </div>`;
+            if (commentsList.querySelector('.no-comments')) commentsList.innerHTML = '';
+            commentsList.insertAdjacentHTML('afterbegin', newComment);
+            input.value = '';
+        }
     };
-    closeBtn.onclick = removeOverlay;
-    viewer.onclick = (e) => {
-        if (e.target === viewer) removeOverlay();
-    };
-    document.body.appendChild(viewer);
-    requestAnimationFrame(() => {
-        viewer.classList.add('visible');
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+    document.body.classList.add('no-scroll');
+}
+
+function closeModal() {
+    const modal = document.getElementById('comments-modal');
+    if (modal) {
+        modal.classList.remove('active');
+        modal.style.display = 'none';
+        document.body.classList.remove('no-scroll');
+    }
+}
+
+document.getElementById('modal-close').addEventListener('click', closeModal);
+document.getElementById('comments-modal').addEventListener('click', e => { if (e.target === e.currentTarget) closeModal(); });
+
+function attachShareButtons() {
+    document.querySelectorAll('.sharePost').forEach(btn => {
+        if (btn.dataset.shareAttached) return;
+        btn.dataset.shareAttached = '1';
+        btn.addEventListener('click', e => {
+            e.stopPropagation();
+            openShareModal(btn.dataset.postId);
+        });
     });
 }
 
-// ---------- ПРИВЯЗКА КЛИКОВ НА МЕДИА ----------
-function bindMediaClicks() {
-    document.querySelectorAll('.carousel-slide img').forEach(img => {
-        if (!img.dataset.clickBound) {
-            img.dataset.clickBound = '1';
-            img.addEventListener('click', (e) => {
-                e.stopPropagation();
-                openFullMedia(img.src, 'image');
+async function openShareModal(postId) {
+    const modal = document.getElementById('share-modal');
+    const chatList = document.getElementById('share-chat-list');
+    let chats = [];
+    try { const data = await kop.get('/api/chats'); chats = data.chats || []; } catch(e) {}
+    if (!chats.length) {
+        chatList.innerHTML = '<p style="color:#8b8fa3;text-align:center;padding:20px;">Нет активных чатов</p>';
+    } else {
+        chatList.innerHTML = chats.map(chat => `
+            <div class="share-chat-item" data-other-user="${chat.other_user_id}" style="display:flex;align-items:center;gap:12px;padding:12px;cursor:pointer;border-radius:12px;">
+                <img src="${kop.esc(chat.avatar || '')}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;">
+                <span>${kop.esc(chat.first_name)} ${kop.esc(chat.last_name)}</span>
+            </div>
+        `).join('');
+        chatList.querySelectorAll('.share-chat-item').forEach(item => {
+            item.addEventListener('click', async () => {
+                const receiverId = item.dataset.otherUser;
+                const postUrl = `${location.origin}/post.php?id=${postId}`;
+                await kop.post('/api/messages/send', { receiver_id: receiverId, content: postUrl });
+                kop.flash('Пост отправлен');
+                modal.classList.remove('active');
+                modal.style.display = 'none';
             });
-        }
-    });
-    document.querySelectorAll('.carousel-slide video').forEach(video => {
-        if (!video.dataset.clickBound) {
-            video.dataset.clickBound = '1';
-            video.addEventListener('click', (e) => {
-                e.stopPropagation();
-                openFullMedia(video.src, 'video');
-            });
-        }
-    });
-    document.querySelectorAll('.postBodyImage').forEach(img => {
-        if (!img.dataset.clickBound) {
-            img.dataset.clickBound = '1';
-            img.addEventListener('click', (e) => {
-                e.stopPropagation();
-                openFullMedia(img.src, 'image');
-            });
-        }
+        });
+    }
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+}
+
+document.getElementById('share-modal-close')?.addEventListener('click', () => {
+    const modal = document.getElementById('share-modal');
+    modal.classList.remove('active');
+    modal.style.display = 'none';
+});
+document.getElementById('share-modal')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) {
+        e.currentTarget.classList.remove('active');
+        e.currentTarget.style.display = 'none';
+    }
+});
+
+// Кнопки дружбы
+const addBtn = document.getElementById('add-friend-btn');
+if (addBtn) addBtn.addEventListener('click', async () => {
+    try { await kop.post('/api/friends/add', { addressee_id: addBtn.dataset.userId }); location.reload(); }
+    catch(e) { kop.flash('Ошибка'); }
+});
+
+const acceptBtn = document.getElementById('accept-friend-btn');
+if (acceptBtn) acceptBtn.addEventListener('click', async () => {
+    try { await kop.post('/api/friends/accept', { requester_id: acceptBtn.dataset.userId }); location.reload(); }
+    catch(e) { kop.flash('Ошибка'); }
+});
+
+const declineBtn = document.getElementById('decline-friend-btn');
+if (declineBtn) declineBtn.addEventListener('click', async () => {
+    try { await kop.post('/api/friends/decline', { requester_id: declineBtn.dataset.userId }); location.reload(); }
+    catch(e) { kop.flash('Ошибка'); }
+});
+
+const friendActionsBtn = document.getElementById('friend-actions-btn');
+if (friendActionsBtn) {
+    friendActionsBtn.addEventListener('click', () => {
+        showFriendActionsModal(friendActionsBtn.dataset.friendId, friendActionsBtn.dataset.requesterId);
     });
 }
 
-// ---------- ИНИЦИАЛИЗАЦИЯ ----------
+function showFriendActionsModal(friendId, requesterId) {
+    const alreadyEndorsed = document.getElementById('friend-actions-btn')?.dataset.alreadyEndorsed === '1';
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.display = 'flex';
+    let buttonsHtml = '';
+    if (alreadyEndorsed) {
+        buttonsHtml = `
+            <span style="color:#059669;font-weight:500;">✓ Вы уже поручились</span>
+            <button class="btn btn--danger" id="remove-friend-btn">Удалить из друзей</button>
+        `;
+    } else {
+        buttonsHtml = `
+            <button class="btn btn--success" id="vouch-btn">Поручиться</button>
+            <button class="btn btn--danger" id="remove-friend-btn">Удалить из друзей</button>
+        `;
+    }
+    overlay.innerHTML = `
+        <div class="modal-container" style="max-width:400px; padding:20px;">
+            <span class="modal-close" style="float:right; cursor:pointer;">&times;</span>
+            <h3 style="margin-top:0;">Управление дружбой</h3>
+            <p>Что вы хотите сделать?</p>
+            <div style="display:flex; gap:12px; justify-content:center; margin-top:20px;">
+                ${buttonsHtml}
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    setTimeout(() => overlay.classList.add('active'), 10);
+    const close = () => {
+        overlay.classList.remove('active');
+        setTimeout(() => overlay.remove(), 300);
+    };
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    const vouchBtn = overlay.querySelector('#vouch-btn');
+    if (vouchBtn) {
+        vouchBtn.addEventListener('click', async () => {
+            try {
+                const resp = await fetch('/api/dfsn/endorse', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken },
+                    body: JSON.stringify({ user_id: friendId })
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    kop.flash(data.message || 'Поручительство принято');
+                    const friendActionsBtn = document.getElementById('friend-actions-btn');
+                    if (friendActionsBtn) friendActionsBtn.dataset.alreadyEndorsed = '1';
+                    close();
+                } else {
+                    kop.flash(data.error || 'Ошибка поручительства');
+                }
+            } catch (e) { kop.flash('Не удалось поручиться'); }
+        });
+    }
+    const removeBtn = overlay.querySelector('#remove-friend-btn');
+    if (removeBtn) {
+        removeBtn.addEventListener('click', async () => {
+            try {
+                const resp = await fetch('/api/friends/decline', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken },
+                    body: JSON.stringify({ friend_id: friendId, requester_id: requesterId })
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    kop.flash('Пользователь удалён из друзей');
+                    close();
+                    replaceFriendButtonWithAdd(friendId);
+                } else {
+                    kop.flash(data.error || 'Ошибка при удалении');
+                }
+            } catch (e) { kop.flash('Ошибка соединения'); }
+        });
+    }
+}
+
+function replaceFriendButtonWithAdd(userId) {
+    const container = document.querySelector('.profileActionsUnderAvatar');
+    const oldBtn = document.getElementById('friend-actions-btn');
+    if (!oldBtn) return;
+    const newBtnHTML = `
+        <button class="btn btn--primary" id="add-friend-btn" data-user-id="${userId}">
+            <span class="Menu__icon" style="background: #e8e0fc; color: #7c3aed;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+            </span>
+            Добавить в друзья
+        </button>
+    `;
+    oldBtn.insertAdjacentHTML('afterend', newBtnHTML);
+    oldBtn.remove();
+    const newBtn = document.getElementById('add-friend-btn');
+    if (newBtn) {
+        newBtn.addEventListener('click', async function() {
+            try {
+                await kop.post('/api/friends/add', { addressee_id: this.dataset.userId });
+                kop.flash('Заявка отправлена');
+                this.outerHTML = '<span class="statusBadge">Заявка отправлена</span>';
+            } catch(e) { kop.flash('Ошибка'); }
+        });
+    }
+}
+
+// Навигация
+const navBtns = document.querySelectorAll('.profileNavigation__btn');
+function setActiveTab(act) {
+    const noPostsPlaceholder = document.querySelector('.no-posts-placeholder');
+    document.querySelectorAll('.post').forEach(p => p.style.display = 'none');
+    const fbSection = document.querySelector('.facebookSection');
+    const friendsSection = document.getElementById('section-friends');
+    const infoSection = document.querySelector('.personalInfoSection');
+    if (fbSection) fbSection.style.display = 'none';
+    if (friendsSection) friendsSection.style.display = 'none';
+    if (infoSection) infoSection.style.display = 'none';
+    if (noPostsPlaceholder) noPostsPlaceholder.style.display = 'none';
+    if (act === 'posts') {
+        document.querySelectorAll('.post').forEach(p => p.style.display = '');
+        if (noPostsPlaceholder) noPostsPlaceholder.style.display = '';
+    } else if (act === 'friends') {
+        if (friendsSection) friendsSection.style.display = '';
+    } else if (act === 'photos') {
+        if (fbSection) fbSection.style.display = '';
+    } else if (act === 'info') {
+        if (infoSection) infoSection.style.display = '';
+    }
+    closeModal();
+}
+navBtns.forEach(btn => {
+    btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        navBtns.forEach(b => b.classList.remove('profileNavigation__btn--active'));
+        this.classList.add('profileNavigation__btn--active');
+        setActiveTab(this.dataset.act);
+    });
+});
+setActiveTab('posts');
+
+function attachPostMenu() {
+    document.querySelectorAll('.postOptions button').forEach(btn => {
+        if (btn.dataset.menuAttached) return;
+        btn.dataset.menuAttached = '1';
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const postDiv = this.closest('.post');
+            showPostMenu(this, postDiv.dataset.postId, postDiv.dataset.authorId);
+        });
+    });
+}
+
+// Инициализация
 document.querySelectorAll('.carousel-container').forEach(initCarousel);
 bindMediaClicks();
 attachReactionHandlers();
@@ -1235,9 +948,12 @@ attachCommentHandler();
 attachPostMenu();
 attachShareButtons();
 
-document.querySelector('.facebookSection').style.display = 'none';
-document.getElementById('section-friends').style.display = 'none';
-document.querySelector('.personalInfoSection').style.display = 'none';
+const fbSectionInit = document.querySelector('.facebookSection');
+if (fbSectionInit) fbSectionInit.style.display = 'none';
+const friendsSectionInit = document.getElementById('section-friends');
+if (friendsSectionInit) friendsSectionInit.style.display = 'none';
+const infoSectionInit = document.querySelector('.personalInfoSection');
+if (infoSectionInit) infoSectionInit.style.display = 'none';
 
 async function updateStatus() {
     try {
@@ -1247,16 +963,12 @@ async function updateStatus() {
             textSpan.textContent = data.text;
             textSpan.className = 'profileStatus ' + data.class;
         }
-    } catch (e) {
-        console.error('updateStatus error:', e);
-    }
+    } catch (e) { console.error('updateStatus error:', e); }
 }
-
 updateStatus();
 setInterval(updateStatus, 120000);
-</script>
 
-<script>
+// Фотоальбом
 (function() {
     const profileUserId = <?= (int)$profileId ?>;
     const photosGrid = document.getElementById('photos-grid');
@@ -1274,12 +986,12 @@ setInterval(updateStatus, 120000);
                     div.className = 'facebookPicture';
                     div.style.position = 'relative';
                     const img = document.createElement('img');
-                    img.src = photo.url;
+                    img.src = kop.esc(photo.url);
                     img.style.cssText = 'width:100%;height:100%;object-fit:cover;cursor:pointer';
                     img.addEventListener('click', () => {
                         const viewer = document.createElement('div');
                         viewer.className = 'image-viewer';
-                        viewer.innerHTML = `<img src="${photo.url}">`;
+                        viewer.innerHTML = `<img src="${kop.esc(photo.url)}" alt="">`;
                         viewer.addEventListener('click', () => viewer.remove());
                         document.body.appendChild(viewer);
                     });
@@ -1290,10 +1002,7 @@ setInterval(updateStatus, 120000);
                 photosGrid.innerHTML = '<p style="width:100%;text-align:center;color:#8b8fa3;">Нет фото</p>';
             }
         })
-        .catch(err => {
-            console.error(err);
-            photosGrid.innerHTML = '<p style="text-align:center;color:#8b8fa3;">Не удалось загрузить фото</p>';
-        });
+        .catch(err => { console.error(err); photosGrid.innerHTML = '<p style="text-align:center;color:#8b8fa3;">Не удалось загрузить фото</p>'; });
     }
     let loaded = false;
     const observer = new MutationObserver(() => {

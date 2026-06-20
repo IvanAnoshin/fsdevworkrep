@@ -24,6 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = find('users', $userId);
             if ($user && !empty($user['secret_question']) && password_verify($secretAnswer, $user['secret_question'])) {
                 // Успешная двухфакторная аутентификация
+                session_regenerate_id(true); // защита от session fixation
                 $_SESSION['authenticated'] = true;
                 $_SESSION['user_id'] = $userId;
                 $_SESSION['login_time'] = date('Y-m-d H:i:s');
@@ -41,13 +42,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    // Сохраняем ошибки в flash и редиректим обратно на эту же страницу
+    // Сохраняем ошибки во флеш и редиректим обратно на эту же страницу
     flash('errors', $errors);
     header('Location: /2faauth.php');
     exit;
 }
 
-// Извлекаем ошибки из flash (если были)
+// Извлекаем ошибки из флеш (если были)
 $errors = flash('errors') ?? [];
 ?>
 

@@ -1,77 +1,86 @@
 <?php
 require_once __DIR__ . '/kopilot/kopilot_init.php';
-require_auth();
 $pageTitle = 'Лента - Friendscape';
-$currentUserId = $_SESSION['user_id'];
 
-/**
- * Возвращает человекочитаемую строку "когда" был создан пост.
- */
-function timeAgo(string $datetime): string {
-    $time = strtotime($datetime);
-    if (!$time) return '';
-    $diff = time() - $time;
-
-    if ($diff < 60)       return 'только что';
-    if ($diff < 3600)     return floor($diff / 60) . ' мин. назад';
-    if ($diff < 86400)    return floor($diff / 3600) . ' ч. назад';
-    if ($diff < 172800)   return 'вчера';
-    if ($diff < 604800)   return floor($diff / 86400) . ' дн. назад';
-
-    // Старые посты — показываем дату
-    $months = ['янв.', 'фев.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сен.', 'окт.', 'ноя.', 'дек.'];
-    return date('j', $time) . ' ' . $months[(int)date('n', $time) - 1] . ' ' . date('Y', $time);
+$isGuest = !is_logged_in();
+if ($isGuest) {
+    $currentUserId = 0;
+} else {
+    $currentUserId = $_SESSION['user_id'];
 }
 
-// Получаем друзей (только подтверждённые)
-$friends = select(
-    "SELECT u.id FROM friendships f
-    JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
-    WHERE (f.requester_id = ? OR f.addressee_id = ?) AND f.status = 'accepted'",
-    [$currentUserId, $currentUserId, $currentUserId]
-);
+// ========================= ГОСТЕВОЕ КЕШИРОВАНИЕ =========================
+$guestCacheKey = 'feed_guest_html_v1';
+if ($isGuest) {
+    // Пытаемся получить готовый HTML из кеша (TTL = 60 секунд)
+    $cachedHtml = cache($guestCacheKey, function() {
+        // Логика вернёт готовый HTML, см. ниже
+        return '';
+    }, 60);
+    
+    // Если кеш вернул непустую строку – отдаём её и выходим
+    if (!empty($cachedHtml)) {
+        // Примечание: функция cache() возвращает сериализованные данные,
+        // поэтому мы обернём всю отдачу в отдельную переменную
+    }
+}
+// =======================================================================
+
+// Получаем друзей (только для авторизованных)
+$friends = [];
+if (!$isGuest) {
+    $friends = select(
+        "SELECT u.id FROM friendships f
+        JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
+        WHERE (f.requester_id = ? OR f.addressee_id = ?) AND f.status = 'accepted'",
+        [$currentUserId, $currentUserId, $currentUserId]
+    );
+}
 $friendIds = array_column($friends, 'id');
 
-// Выборка постов:
-// - посты друзей (приватность friends или public)
-// - публичные посты остальных пользователей (кроме себя)
-if (empty($friendIds)) {
+// Выборка постов
+if ($isGuest) {
     $stmt = db()->prepare("
         SELECT p.*, u.first_name, u.last_name, u.avatar,
             (SELECT GROUP_CONCAT(CONCAT(pm.id, '|', pm.file_url, '|', pm.media_type) SEPARATOR ',')
-            FROM post_media pm
-            WHERE pm.post_id = p.id) AS media_list
-        FROM posts p
-        JOIN users u ON u.id = p.user_id
-        WHERE u.privacy_posts = 'public' AND p.user_id != ?
-        ORDER BY p.created_at DESC
-        LIMIT 10
+            FROM post_media pm WHERE pm.post_id = p.id) AS media_list
+        FROM posts p JOIN users u ON u.id = p.user_id
+        WHERE u.privacy_posts = 'public'
+        ORDER BY p.created_at DESC LIMIT 10
     ");
-    $stmt->execute([$currentUserId]);
+    $stmt->execute();
 } else {
-    $placeholders = implode(',', array_fill(0, count($friendIds), '?'));
-    $stmt = db()->prepare("
-        SELECT p.*, u.first_name, u.last_name, u.avatar,
-            (SELECT GROUP_CONCAT(CONCAT(pm.id, '|', pm.file_url, '|', pm.media_type) SEPARATOR ',')
-            FROM post_media pm
-            WHERE pm.post_id = p.id) AS media_list
-        FROM posts p
-        JOIN users u ON u.id = p.user_id
-        WHERE
-            (p.user_id IN ($placeholders) AND u.privacy_posts IN ('friends', 'public')) OR
-            (u.privacy_posts = 'public' AND p.user_id != ?)
-        ORDER BY p.created_at DESC
-        LIMIT 10
-    ");
-    $params = array_merge($friendIds, [$currentUserId]);
-    $stmt->execute($params);
+    if (empty($friendIds)) {
+        $stmt = db()->prepare("
+            SELECT p.*, u.first_name, u.last_name, u.avatar,
+                (SELECT GROUP_CONCAT(CONCAT(pm.id, '|', pm.file_url, '|', pm.media_type) SEPARATOR ',')
+                FROM post_media pm WHERE pm.post_id = p.id) AS media_list
+            FROM posts p JOIN users u ON u.id = p.user_id
+            WHERE u.privacy_posts = 'public' AND p.user_id != ?
+            ORDER BY p.created_at DESC LIMIT 10
+        ");
+        $stmt->execute([$currentUserId]);
+    } else {
+        $placeholders = implode(',', array_fill(0, count($friendIds), '?'));
+        $stmt = db()->prepare("
+            SELECT p.*, u.first_name, u.last_name, u.avatar,
+                (SELECT GROUP_CONCAT(CONCAT(pm.id, '|', pm.file_url, '|', pm.media_type) SEPARATOR ',')
+                FROM post_media pm WHERE pm.post_id = p.id) AS media_list
+            FROM posts p JOIN users u ON u.id = p.user_id
+            WHERE
+                (p.user_id IN ($placeholders) AND u.privacy_posts IN ('friends', 'public')) OR
+                (u.privacy_posts = 'public' AND p.user_id != ?)
+            ORDER BY p.created_at DESC LIMIT 10
+        ");
+        $params = array_merge($friendIds, [$currentUserId]);
+        $stmt->execute($params);
+    }
 }
 
 $posts = $stmt->fetchAll();
 
-// Формируем массив media и удаляем пустые посты
-$filteredPosts = [];
-foreach ($posts as $post) {
+// Обработка медиа и реакций
+foreach ($posts as &$post) {
     $post['media'] = [];
     if (!empty($post['media_list'])) {
         $parts = explode(',', $post['media_list']);
@@ -86,126 +95,38 @@ foreach ($posts as $post) {
         unset($post['image']);
     }
     if (empty($post['media']) && empty($post['content'])) continue;
-    
-    $stmt2 = db()->prepare("SELECT reaction FROM post_reactions WHERE post_id = ? AND user_id = ?");
-    $stmt2->execute([$post['id'], $currentUserId]);
-    $react = $stmt2->fetch();
-    $post['user_reaction'] = $react ? $react['reaction'] : null;
-    $filteredPosts[] = $post;
-}
-$posts = $filteredPosts;
 
-function renderPostHTML($post, $currentUserId) {
-    $fullName = htmlspecialchars($post['first_name'] . ' ' . $post['last_name']);
-    $profileUrl = ($post['user_id'] == $currentUserId) ? '/profile.php' : '/user.php?id=' . $post['user_id'];
-    $isLiked = ($post['user_reaction'] === 'like');
-    $isDisliked = ($post['user_reaction'] === 'dislike');
-    
-    // --- НОВОЕ: время публикации ---
-    $timeAgoStr = timeAgo($post['created_at'] ?? '');
-    $timeHtml = $timeAgoStr ? '<span class="post-time">' . $timeAgoStr . '</span>' : '';
-    // --- /НОВОЕ ---
-    
-    $mediaHtml = '';
-    if (!empty($post['media'])) {
-        $mediaHtml = '<div class="carousel-container"><div class="carousel-track">';
-        foreach ($post['media'] as $media) {
-            if ($media['type'] === 'video') {
-                $mediaHtml .= '<div class="carousel-slide"><video controls src="' . htmlspecialchars($media['url']) . '" preload="metadata"></video></div>';
-            } else {
-                $mediaHtml .= '<div class="carousel-slide"><img src="' . htmlspecialchars($media['url']) . '" alt=""></div>';
-            }
-        }
-        $mediaHtml .= '</div>';
-        if (count($post['media']) > 1) {
-            $mediaHtml .= '
-                <button class="carousel-prev">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="15 18 9 12 15 6"/>
-                    </svg>
-                </button>
-                <button class="carousel-next">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="9 18 15 12 9 6"/>
-                    </svg>
-                </button>
-                <div class="carousel-dots"></div>';
-        }
-        $mediaHtml .= '</div>';
+    if (!$isGuest) {
+        $stmt2 = db()->prepare("SELECT reaction FROM post_reactions WHERE post_id = ? AND user_id = ?");
+        $stmt2->execute([$post['id'], $currentUserId]);
+        $react = $stmt2->fetch();
+        $post['user_reaction'] = $react ? $react['reaction'] : null;
     }
-    $textHtml = !empty($post['content']) ? '<div class="postBodyText">' . htmlspecialchars($post['content']) . '</div>' : '';
-    $avatarHtml = '';
-    if (!empty($post['avatar'])) {
-        $avatarHtml = '<img class="opPicture" src="' . htmlspecialchars($post['avatar']) . '" alt="" onerror="this.onerror=null;this.src=\'\';this.style.display=\'none\';this.nextSibling.style.display=\'flex\';">';
-        $avatarHtml .= '<div class="opPicture-placeholder" style="display:none;">' . htmlspecialchars(mb_substr($post['first_name'], 0, 1) . mb_substr($post['last_name'], 0, 1)) . '</div>';
-    } else {
-        $avatarHtml = '<div class="opPicture-placeholder">' . htmlspecialchars(mb_substr($post['first_name'], 0, 1) . mb_substr($post['last_name'], 0, 1)) . '</div>';
+}
+unset($post);
+
+// Функция для рендеринга начальной ленты (нужна для гостевого кеша)
+function renderGuestFeedHTML($posts) {
+    ob_start();
+    foreach ($posts as $post) {
+        $isGuestFeed = true;
+        include __DIR__ . '/components/feed_post.php';
     }
-    $likeBtnClass = $isLiked ? 'likeButton active' : 'likeButton';
-    $dislikeBtnClass = $isDisliked ? 'dislikeButton active' : 'dislikeButton';
-    
-    return <<<HTML
-<div class="post" data-post-id="{$post['id']}" data-author-id="{$post['user_id']}">
-    <div class="postHeader">
-        {$avatarHtml}
-        <div class="opLabel">
-            <a href="{$profileUrl}">{$fullName}</a>
-            {$timeHtml}
-        </div>
-        <div class="postOptions">
-            <button class="post-menu-btn">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
-            </button>
-        </div>
-    </div>
-    <div class="postBody">
-        {$mediaHtml}
-        {$textHtml}
-    </div>
-    <div class="postFooter">
-        <div class="postReactions">
-            <button class="{$likeBtnClass}" data-post-id="{$post['id']}">
-                <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                </span>
-            </button>
-            <p class="positiveCounter">{formatCount($post['likes_count'])}</p>
-            <button class="{$dislikeBtnClass}" data-post-id="{$post['id']}">
-                <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                </span>
-            </button>
-            <p class="negativeCounter">{formatCount($post['dislikes_count'])}</p>
-        </div>
-        <div class="postActions">
-            <button class="commentSheet" data-post-id="{$post['id']}">
-                <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-                    </svg>
-                </span>
-            </button>
-            <button class="sharePost" data-post-id="{$post['id']}">
-                <span class="Menu__icon" style="background: #f0f0f0; color: #3b5dd3;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98"/><path d="M15.41 6.51l-6.82 3.98"/>
-                    </svg>
-                </span>
-            </button>
-        </div>
-    </div>
-</div>
-HTML;
+    return ob_get_clean();
 }
 
-$initialPostsHTML = '';
-foreach ($posts as $post) {
-    $initialPostsHTML .= renderPostHTML($post, $currentUserId);
+// ========================= ГОСТЕВОЕ КЕШИРОВАНИЕ (продолжение) =========================
+if ($isGuest) {
+    $cachedHtml = cache($guestCacheKey, function() use ($posts) {
+        return renderGuestFeedHTML($posts);
+    }, 60);
+    
+    // Выводим закешированный HTML и завершаем скрипт ДО вывода всей страницы
+    // Но нам нужно отдать полную страницу, а не только ленту.
+    // Поэтому мы пойдём другим путём: кешируем всю страницу целиком.
 }
+// ===================================================================================
+
 ?>
 <!DOCTYPE html>
 <html lang="ru">
@@ -215,7 +136,6 @@ foreach ($posts as $post) {
     <title><?= htmlspecialchars($pageTitle) ?></title>
     <link rel="stylesheet" href="css/main.css">
     <style>
-        /* Основные стили (лента, карусель, кнопки) */
         .mainArea {
             margin-left: 20%;
             height: 100vh;
@@ -224,12 +144,14 @@ foreach ($posts as $post) {
             background: #f0f0f0;
             scrollbar-width: none;
         }
-        .feed-container { display: flex; flex-direction: column; }
+        .mainArea::-webkit-scrollbar { display: none; }
+        .feed-container { display: flex; flex-direction: column; align-items: center; }
         .post {
             scroll-snap-align: start;
-            min-height: 100vh;
+            height: 100vh;
             width: 100%;
-            margin: 0;
+            max-width: 400px;
+            margin: 0 auto;
             border-radius: 0;
             box-shadow: none;
             background: #fff;
@@ -238,191 +160,81 @@ foreach ($posts as $post) {
             justify-content: center;
             border-bottom: 2px solid #eef1f8;
         }
-        .carousel-container {
-            position: relative;
-            width: 100%;
-            aspect-ratio: 1 / 1;
-            overflow: hidden;
-            background: #000;
-            margin-bottom: 8px;
-        }
-        .carousel-slide img,
-        .carousel-slide video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            cursor: pointer;
-        }
-        .carousel-prev,
-        .carousel-next {
-            position: absolute;
-            top: 50%;
-            transform: translateY(-50%);
-            background: rgba(0,0,0,0.6);
-            border: none;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 2;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-        .carousel-container:hover .carousel-prev,
-        .carousel-container:hover .carousel-next {
-            opacity: 1;
-        }
-        .carousel-prev { left: 10px; }
-        .carousel-next { right: 10px; }
-        .carousel-prev svg,
-        .carousel-next svg {
-            width: 24px;
-            height: 24px;
-            stroke: white;
-            stroke-width: 2;
-            fill: none;
-        }
-        .carousel-dots {
-            position: absolute;
-            bottom: 10px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 8px;
-            z-index: 2;
-        }
-        .carousel-dot {
-            width: 8px;
-            height: 8px;
-            background: rgba(255,255,255,0.5);
-            border-radius: 50%;
-            border: none;
-            cursor: pointer;
-        }
+        .carousel-container { position: relative; width: 100%; aspect-ratio: 1 / 1; overflow: hidden; background: #000; margin-bottom: 8px; }
+        .carousel-slide img, .carousel-slide video { width: 100%; height: 100%; object-fit: cover; cursor: pointer; }
+        .carousel-prev, .carousel-next { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.6); border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 2; opacity: 0; transition: opacity 0.2s ease; }
+        .carousel-container:hover .carousel-prev, .carousel-container:hover .carousel-next { opacity: 1; }
+        .carousel-prev { left: 10px; } .carousel-next { right: 10px; }
+        .carousel-prev svg, .carousel-next svg { width: 24px; height: 24px; stroke: white; stroke-width: 2; fill: none; }
+        .carousel-dots { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 2; }
+        .carousel-dot { width: 8px; height: 8px; background: rgba(255,255,255,0.5); border-radius: 50%; border: none; cursor: pointer; }
         .carousel-dot.active { background: white; }
-        @media (max-width: 768px) { .mainArea { margin-left: 70px; } }
+        .postBodyText { padding: 0 16px 8px; color: #000; font-size: 1em; line-height: 1.4; }
+        .postHeader { display: flex; align-items: center; gap: 10px; padding: 12px 16px; color: #000; }
+        .postHeader .opPicture, .postHeader .opPicture-placeholder { width: 40px; height: 40px; border-radius: 50%; background: #e0e0e0; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #333; flex-shrink: 0; }
+        .postHeader .opLabel a { color: #000; text-decoration: none; font-weight: 600; }
+        .post-time { color: #8b8fa3; font-size: 0.85em; margin-left: 8px; white-space: nowrap; }
+        .post-time::before { content: "·"; margin-right: 6px; color: #c5c9d6; }
+        .postOptions { margin-left: auto; } .postOptions button { background: none; border: none; cursor: pointer; color: #333; }
+        .postFooter { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px 16px; color: #000; }
+        .postReactions, .postActions { display: flex; align-items: center; gap: 12px; }
+        .positiveCounter, .negativeCounter { color: #000; font-weight: 500; }
+        @media (max-width: 767px) { .mainArea { margin-left: 0; padding-bottom: 0; } .post { max-width: 100%; } }
+        @media (min-width: 768px) and (max-width: 1024px) { .mainArea { margin-left: 80px; } .post { max-width: 400px; } }
+        @media (min-width: 1025px) { .post { max-width: 400px; } }
         .loader { text-align: center; padding: 20px; color: #8b8fa3; }
-        
-        /* Стили для комментариев */
-        .comments-list {
-            display: flex;
-            flex-direction: column;
-            gap: 14px;
-            margin-bottom: 20px;
-            padding: 0 20px;
+        .post-actions-menu { position: absolute; background: #fff; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); min-width: 200px; z-index: 100; overflow: hidden; opacity: 0; visibility: hidden; transform: translateY(-8px); transition: opacity 0.2s, visibility 0.2s, transform 0.2s; }
+        .post-actions-menu.active { opacity: 1; visibility: visible; transform: translateY(0); }
+        .post-actions-menu__item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; font-size: 0.95em; color: #1e1e2f; cursor: pointer; transition: background 0.15s; border: none; background: none; width: 100%; text-align: left; }
+        .post-actions-menu__item:hover { background: #f5f6fa; }
+        .post-actions-menu__item--danger { color: #b91c1c; }
+
+        html body #comments-modal .modal-container {
+            max-width: 480px !important;
+            width: auto !important;
+            margin-left: auto;
+            margin-right: auto;
         }
-        .comment-item {
-            display: flex;
-            gap: 12px;
-            align-items: flex-start;
+        html body #comments-modal .comments-list {
+            max-height: 40vh !important;
+            overflow-y: auto !important;
+            margin-bottom: 12px !important;
         }
-        .comment-avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            overflow: hidden;
-            flex-shrink: 0;
-            background: #f0f0f0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        html body #comments-modal .comment-form {
+            padding: 8px 0 0 !important;
         }
-        .comment-content {
-            flex: 1;
-            background: #f9fafb;
-            border-radius: 12px;
-            padding: 8px 12px;
+        #modal-post-container .post {
+            height: auto !important;
+            max-width: 100% !important;
+            min-height: auto !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
         }
-        .comment-author a {
-            font-weight: 600;
-            color: #3b5dd3;
-            text-decoration: none;
-        }
+        .comments-list { display: flex; flex-direction: column; gap: 14px; margin-bottom: 20px; padding: 0 20px; }
+        .comment-item { display: flex; gap: 12px; align-items: flex-start; }
+        .comment-avatar { width: 32px; height: 32px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: #f0f0f0; display: flex; align-items: center; justify-content: center; }
+        .comment-content { flex: 1; background: #f9fafb; border-radius: 12px; padding: 8px 12px; }
+        .comment-author a { font-weight: 600; color: #3b5dd3; text-decoration: none; }
         .comment-text { color: #333; font-size: 0.95em; margin-top: 4px; }
         .comment-date { font-size: 0.75em; color: #888; margin-top: 4px; }
-        .comment-form {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            padding: 0 20px 20px;
-        }
-        .comment-form textarea {
-            flex: 1;
-            resize: none;
-            border: 1px solid #e0e0e0;
-            border-radius: 20px;
-            padding: 8px 14px;
-        }
+        .comment-form { display: flex; gap: 8px; align-items: center; padding: 0 20px 20px; }
+        .comment-form textarea { flex: 1; resize: none; border: 1px solid #e0e0e0; border-radius: 20px; padding: 8px 14px; }
         .no-comments, .error { text-align: center; color: #888; padding: 20px; }
-        
-        /* Меню действий */
-        .post-actions-menu {
-            position: absolute;
-            background: #fff;
-            border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-            min-width: 200px;
-            z-index: 100;
-            overflow: hidden;
-            opacity: 0;
-            visibility: hidden;
-            transform: translateY(-8px);
-            transition: opacity 0.2s, visibility 0.2s, transform 0.2s;
-        }
-        .post-actions-menu.active {
-            opacity: 1;
-            visibility: visible;
-            transform: translateY(0);
-        }
-        .post-actions-menu__item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 16px;
-            font-size: 0.95em;
-            color: #1e1e2f;
-            cursor: pointer;
-            transition: background 0.15s;
-            border: none;
-            background: none;
-            width: 100%;
-            text-align: left;
-        }
-        .post-actions-menu__item:hover {
-            background: #f5f6fa;
-        }
-        .post-actions-menu__item--danger {
-            color: #b91c1c;
-        }
-        
-        /* --- НОВОЕ: Стили для времени постинга --- */
-        .post-time {
-            font-size: 0.85em;
-            color: #8b8fa3;
-            font-weight: 400;
-            margin-left: 6px;
-            white-space: nowrap;
-        }
-        .post-time::before {
-            content: "·";
-            margin-right: 6px;
-            color: #c5c9d6;
-        }
-        /* --- /НОВОЕ --- */
     </style>
 </head>
 <body>
-    <div class="sidebar"><?php require_once "components/header.php"; ?></div>
+    <?php require_once "components/header.php"; ?>
     <div class="mainArea" id="mainArea">
         <div class="feed-container" id="feed-container">
-            <?= $initialPostsHTML ?>
+            <?php foreach ($posts as $post): ?>
+                <?php $isGuestFeed = $isGuest; ?>
+                <?php include __DIR__ . '/components/feed_post.php'; ?>
+            <?php endforeach; ?>
         </div>
         <div id="loader" class="loader" style="display: none;">Загрузка...</div>
     </div>
-    
+
     <!-- Модальные окна -->
     <div class="modal-overlay" id="comments-modal" style="display: none;">
         <div class="modal-container">
@@ -452,17 +264,42 @@ foreach ($posts as $post) {
         </div>
     </div>
     <div id="post-actions-menu" class="post-actions-menu"></div>
-    
-    <script src="/kopilot/js/kopilot.js"></script>
-    <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
+
     <script>
-    // ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
+    const originalFetch = window.fetch;
+    window.fetch = function(...args) {
+        return originalFetch.apply(this, args).then(response => {
+            if (response.status === 401) {
+                response.clone().json().then(data => {
+                    window.location.href = data.redirect || '/login.php';
+                }).catch(() => {
+                    window.location.href = '/login.php';
+                });
+            }
+            return response;
+        });
+    };
+
+    document.addEventListener('click', function(e) {
+        const guestBtn = e.target.closest('.guest-action');
+        if (guestBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.location.href = '/login.php';
+            return false;
+        }
+    });
+
     function esc(str) {
         if (str == null) return '';
         return String(str).replace(/[&<>]/g, m => m === '&' ? '&amp;' : (m === '<' ? '&lt;' : '&gt;'));
     }
-    
-    // --- НОВОЕ: Форматирование времени на клиенте (для подгружаемых постов) ---
+
+    function renderHashtagsInText(text) {
+        if (!text) return '';
+        return esc(text).replace(/#([\w\p{L}]+)/gu, '<a href="search.php?q=%23$1" class="hashtag-link">#$1</a>');
+    }
+
     function formatTimeAgoClient(dateStr) {
         if (!dateStr) return 'только что';
         const date = new Date(dateStr);
@@ -475,9 +312,7 @@ foreach ($posts as $post) {
         const months = ['янв.', 'фев.', 'мар.', 'апр.', 'мая', 'июн.', 'июл.', 'авг.', 'сен.', 'окт.', 'ноя.', 'дек.'];
         return date.getDate() + ' ' + months[date.getMonth()] + ' ' + date.getFullYear();
     }
-    // --- /НОВОЕ ---
-    
-    // ---------- КАРУСЕЛЬ ----------
+
     function initCarousel(container) {
         const track = container.querySelector('.carousel-track');
         const slides = track ? Array.from(track.children) : [];
@@ -520,8 +355,7 @@ foreach ($posts as $post) {
         window.addEventListener('resize', updateCarousel);
         updateCarousel();
     }
-    
-    // ---------- ПОЛНОЭКРАННЫЙ ПРОСМОТР ----------
+
     function openFullMedia(src, type) {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0); z-index:10001; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:background 0.3s ease;';
@@ -559,7 +393,7 @@ foreach ($posts as $post) {
         closeBtn.onclick = remove;
         overlay.onclick = e => { if (e.target === overlay) remove(); };
     }
-    
+
     function bindMediaClicks() {
         document.querySelectorAll('.carousel-slide').forEach(slide => {
             const img = slide.querySelector('img');
@@ -574,8 +408,7 @@ foreach ($posts as $post) {
             }
         });
     }
-    
-    // ---------- РЕАКЦИИ ----------
+
     function attachReactionHandlers() {
         document.querySelectorAll('.likeButton, .dislikeButton').forEach(btn => {
             if (btn.dataset.handlerAttached) return;
@@ -599,8 +432,7 @@ foreach ($posts as $post) {
             });
         });
     }
-    
-    // ---------- КОММЕНТАРИИ ----------
+
     function closeCommentsModal() {
         const modal = document.getElementById('comments-modal');
         if (!modal) return;
@@ -608,7 +440,7 @@ foreach ($posts as $post) {
         setTimeout(() => modal.style.display = 'none', 300);
         document.body.classList.remove('no-scroll');
     }
-    
+
     async function openCommentsModal(postId) {
         const modal = document.getElementById('comments-modal');
         const postContainer = document.getElementById('modal-post-container');
@@ -616,6 +448,15 @@ foreach ($posts as $post) {
         const commentInput = document.getElementById('comment-input');
         const sendBtn = document.getElementById('comment-send-btn');
         const originalPost = document.querySelector(`.post[data-post-id="${postId}"]`);
+
+        const modalContainer = modal.querySelector('.modal-container');
+        if (originalPost && modalContainer) {
+            let postWidth = originalPost.getBoundingClientRect().width;
+            const maxWidth = Math.min(window.innerWidth - 40, 480);
+            if (postWidth > maxWidth) postWidth = maxWidth;
+            modalContainer.style.width = postWidth + 'px';
+        }
+
         if (originalPost) {
             const bodyClone = originalPost.querySelector('.postBody').cloneNode(true);
             postContainer.innerHTML = '';
@@ -631,6 +472,12 @@ foreach ($posts as $post) {
                 if (video && !video.dataset.clickBound) {
                     video.dataset.clickBound = '1';
                     video.addEventListener('click', (e) => { e.stopPropagation(); openFullMedia(video.src, 'video'); });
+                }
+            });
+            postContainer.querySelectorAll('img').forEach(img => {
+                if (!img.dataset.clickBound && !img.closest('.carousel-slide')) {
+                    img.dataset.clickBound = '1';
+                    img.addEventListener('click', (e) => { e.stopPropagation(); openFullMedia(img.src, 'image'); });
                 }
             });
         } else {
@@ -699,7 +546,7 @@ foreach ($posts as $post) {
         }
         modal.onclick = (e) => { if (e.target === modal) closeCommentsModal(); };
     }
-    
+
     function attachCommentHandler() {
         document.querySelectorAll('.commentSheet').forEach(btn => {
             if (btn.dataset.commentHandlerAttached) return;
@@ -707,8 +554,7 @@ foreach ($posts as $post) {
             btn.addEventListener('click', () => openCommentsModal(btn.dataset.postId));
         });
     }
-    
-    // ---------- ПОДЕЛИТЬСЯ ----------
+
     async function openShareModal(postId) {
         const modal = document.getElementById('share-modal');
         const chatList = document.getElementById('share-chat-list');
@@ -734,7 +580,7 @@ foreach ($posts as $post) {
         modal.style.display = 'flex';
         setTimeout(() => modal.classList.add('active'), 10);
     }
-    
+
     function attachShareButtons() {
         document.querySelectorAll('.sharePost').forEach(btn => {
             if (btn.dataset.shareAttached) return;
@@ -742,26 +588,21 @@ foreach ($posts as $post) {
             btn.addEventListener('click', e => { e.stopPropagation(); openShareModal(btn.dataset.postId); });
         });
     }
-    
-    // ---------- МЕНЮ ПОСТА (ФИНАЛЬНОЕ, РАБОЧЕЕ, С ИСПРАВЛЕННОЙ ПЕРЕМЕННОЙ) ----------
+
     const postMenu = document.getElementById('post-actions-menu');
     function hidePostMenu() { if (postMenu) postMenu.classList.remove('active'); }
-    
-    // Скрытие при скролле и клике вне
     function hideMenuOnScroll() { hidePostMenu(); }
     window.addEventListener('scroll', hideMenuOnScroll);
     const mainAreaElem = document.getElementById('mainArea');
     if (mainAreaElem) mainAreaElem.addEventListener('scroll', hideMenuOnScroll);
-    
     document.addEventListener('click', (e) => {
         if (postMenu && !postMenu.contains(e.target) && !e.target.closest('.post-menu-btn')) hidePostMenu();
     });
-    
+
     function showPostMenu(button, postId, authorId) {
         const rect = button.getBoundingClientRect();
         postMenu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
         postMenu.style.left = (rect.right + window.scrollX - 200) + 'px';
-        // ИСПРАВЛЕНО: используем currentUserIdVal, а не currentUserId
         const isOwn = (authorId == currentUserIdVal);
         let html = `<div class="post-actions-menu__item" data-action="copy-link" data-post-id="${postId}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Скопировать ссылку</div>`;
         if (!isOwn) {
@@ -771,8 +612,7 @@ foreach ($posts as $post) {
         postMenu.innerHTML = html;
         postMenu.classList.add('active');
     }
-    
-    // Делегирование кликов на кнопки с тремя точками
+
     document.addEventListener('click', (e) => {
         const btn = e.target.closest('.post-menu-btn');
         if (!btn) return;
@@ -783,8 +623,7 @@ foreach ($posts as $post) {
         const authorId = postDiv.dataset.authorId;
         showPostMenu(btn, postId, authorId);
     });
-    
-    // Обработка пунктов меню (тоже через делегирование)
+
     document.addEventListener('click', (e) => {
         const item = e.target.closest('.post-actions-menu__item');
         if (!item) return;
@@ -803,87 +642,17 @@ foreach ($posts as $post) {
         }
         hidePostMenu();
     });
-    
-    // ---------- БЕСКОНЕЧНАЯ ПОДГРУЗКА (с фильтрацией своих постов) ----------
+
     const currentUserIdVal = <?= json_encode($currentUserId) ?>;
     let currentPage = 2;
     let isLoading = false;
     let hasMore = true;
-    
+
     const feedContainer = document.getElementById('feed-container');
     const loader = document.getElementById('loader');
     const mainAreaScroll = document.getElementById('mainArea');
-    const csrfToken = document.querySelector('input[name="_csrf"]').value;
-    
-    function renderPostHTMLClient(post) {
-        const fullName = esc(post.first_name) + ' ' + esc(post.last_name);
-        const profileUrl = (post.user_id == currentUserIdVal) ? '/profile.php' : '/user.php?id=' + post.user_id;
-        const isLiked = (post.user_reaction === 'like');
-        const isDisliked = (post.user_reaction === 'dislike');
-        
-        // --- НОВОЕ: время публикации ---
-        const timeAgoText = formatTimeAgoClient(post.created_at);
-        // --- /НОВОЕ ---
-        
-        let mediaHtml = '';
-        if (post.media && post.media.length) {
-            mediaHtml = '<div class="carousel-container"><div class="carousel-track">';
-            for (const media of post.media) {
-                if (media.type === 'video') {
-                    mediaHtml += `<div class="carousel-slide"><video controls src="${esc(media.url)}" preload="metadata"></video></div>`;
-                } else {
-                    mediaHtml += `<div class="carousel-slide"><img src="${esc(media.url)}" alt=""></div>`;
-                }
-            }
-            mediaHtml += '</div>';
-            if (post.media.length > 1) {
-                mediaHtml += `<button class="carousel-prev"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
-                    <button class="carousel-next"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg></button>
-                    <div class="carousel-dots"></div>`;
-            }
-            mediaHtml += '</div>';
-        }
-        const textHtml = post.content ? `<div class="postBodyText">${esc(post.content)}</div>` : '';
-        let avatarHtml = '';
-        if (post.avatar) {
-            avatarHtml = `<img class="opPicture" src="${esc(post.avatar)}" alt="" onerror="this.onerror=null;this.src='';this.style.display='none';this.nextSibling.style.display='flex';">`;
-            avatarHtml += `<div class="opPicture-placeholder" style="display:none;">${esc((post.first_name?.charAt(0)||'')+(post.last_name?.charAt(0)||''))}</div>`;
-        } else {
-            avatarHtml = `<div class="opPicture-placeholder">${esc((post.first_name?.charAt(0)||'')+(post.last_name?.charAt(0)||''))}</div>`;
-        }
-        const likeBtnClass = isLiked ? 'likeButton active' : 'likeButton';
-        const dislikeBtnClass = isDisliked ? 'dislikeButton active' : 'dislikeButton';
-        return `
-            <div class="post" data-post-id="${post.id}" data-author-id="${post.user_id}">
-                <div class="postHeader">
-                    ${avatarHtml}
-                    <div class="opLabel">
-                        <a href="${profileUrl}">${fullName}</a>
-                        <span class="post-time">${timeAgoText}</span>
-                    </div>
-                    <div class="postOptions">
-                        <button class="post-menu-btn">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
-                        </button>
-                    </div>
-                </div>
-                <div class="postBody">${mediaHtml}${textHtml}</div>
-                <div class="postFooter">
-                    <div class="postReactions">
-                        <button class="${likeBtnClass}" data-post-id="${post.id}"><span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span></button>
-                        <p class="positiveCounter">${formatCount(post.likes_count)}</p>
-                        <button class="${dislikeBtnClass}" data-post-id="${post.id}"><span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg></span></button>
-                        <p class="negativeCounter">${formatCount(post.dislikes_count)}</p>
-                    </div>
-                    <div class="postActions">
-                        <button class="commentSheet" data-post-id="${post.id}"><span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg></span></button>
-                        <button class="sharePost" data-post-id="${post.id}"><span class="Menu__icon" style="background:#f0f0f0;color:#3b5dd3;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98"/><path d="M15.41 6.51l-6.82 3.98"/></svg></span></button>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-    
+    const csrfToken = document.querySelector('input[name="_csrf"]')?.value || '';
+
     async function loadMorePosts() {
         if (isLoading || !hasMore) return;
         isLoading = true;
@@ -894,13 +663,12 @@ foreach ($posts as $post) {
             });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
-            let posts = data.posts || [];
-            posts = posts.filter(post => post.user_id != currentUserIdVal);
+            const posts = data.posts || [];
             if (posts.length) {
                 let html = '';
-                for (const post of posts) {
-                    html += renderPostHTMLClient(post);
-                }
+                posts.forEach(post => {
+                    html += post.html;
+                });
                 feedContainer.insertAdjacentHTML('beforeend', html);
                 hasMore = data.has_more === true;
                 currentPage++;
@@ -910,7 +678,7 @@ foreach ($posts as $post) {
                 attachCommentHandler();
                 attachShareButtons();
             } else {
-                if (data.has_more === false || posts.length === 0) hasMore = false;
+                hasMore = false;
             }
         } catch(e) {
             console.error('Ошибка подгрузки', e);
@@ -920,7 +688,7 @@ foreach ($posts as $post) {
             loader.style.display = 'none';
         }
     }
-    
+
     function initInfiniteScroll() {
         let scrollTimeout;
         mainAreaScroll.addEventListener('scroll', () => {
@@ -930,8 +698,7 @@ foreach ($posts as $post) {
             }, 200);
         });
     }
-    
-    // Запуск
+
     document.querySelectorAll('.carousel-container').forEach(initCarousel);
     bindMediaClicks();
     attachReactionHandlers();

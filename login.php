@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/kopilot/kopilot_init.php';
-require_guest(); // если уже залогинен, перенаправляем
+require_guest();
 
 $errors = [];
 $old = [];
@@ -10,54 +10,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!hash_equals(csrf_token(), $_POST['_csrf'] ?? '')) {
         $errors['csrf'] = 'Недействительный CSRF-токен';
     } else {
-        $firstName = trim($_POST['first_name'] ?? '');
-        $lastName  = trim($_POST['last_name'] ?? '');
-        $password  = $_POST['password'] ?? '';
+        $rateKey = 'login_' . ($_SERVER['REMOTE_ADDR'] ?? 'global');
+        if (!check_rate_limit($rateKey, 5, 600)) {
+            $errors['rate'] = 'Слишком много попыток. Попробуйте позже.';
+        } else {
+            $firstName = trim($_POST['first_name'] ?? '');
+            $lastName  = trim($_POST['last_name'] ?? '');
+            $password  = $_POST['password'] ?? '';
 
-        if ($firstName === '') {
-            $errors['first_name'] = 'Введите имя';
-        }
-        if ($lastName === '') {
-            $errors['last_name'] = 'Введите фамилию';
-        }
-        if ($password === '') {
-            $errors['password'] = 'Введите пароль';
-        }
-
-        if (empty($errors)) {
-            // Ищем пользователя по имени и фамилии
-            $stmt = db()->prepare("SELECT id, password FROM users WHERE first_name = ? AND last_name = ?");
-            $stmt->execute([$firstName, $lastName]);
-            $candidates = $stmt->fetchAll();
-
-            $matched = [];
-            foreach ($candidates as $user) {
-                if (password_verify($password, $user['password'])) {
-                    $matched[] = $user['id'];
-                }
-            }
-
-            if (count($matched) === 1) {
-                // Успешная аутентификация – переходим к двухфакторной проверке
-                $_SESSION['login_user_id'] = $matched[0];
-                header('Location: /2faauth.php');
-                exit;
-            } elseif (count($matched) > 1) {
-                $errors['auth'] = 'Неоднозначность данных. Свяжитесь с поддержкой.';
-            } else {
+            if ($firstName === '' || $lastName === '' || $password === '') {
                 $errors['auth'] = 'Неверное имя, фамилия или пароль';
+                record_attempt($rateKey);
+            } else {
+                $stmt = db()->prepare("SELECT id, password FROM users WHERE first_name = ? AND last_name = ?");
+                $stmt->execute([$firstName, $lastName]);
+                $candidates = $stmt->fetchAll();
+
+                $matched = [];
+                foreach ($candidates as $user) {
+                    if (password_verify($password, $user['password'])) {
+                        $matched[] = $user['id'];
+                    }
+                }
+
+                if (count($matched) === 1) {
+                    session_regenerate_id(true);
+                    $_SESSION['login_user_id'] = $matched[0];
+                    header('Location: /2faauth.php');
+                    exit;
+                } else {
+                    $errors['auth'] = 'Неверное имя, фамилия или пароль';
+                    record_attempt($rateKey);
+                }
             }
         }
     }
 
-    // Сохраняем ошибки и старые значения
     flash('errors', $errors);
     set_old($_POST);
     header('Location: /login.php');
     exit;
 }
 
-// Извлекаем ошибки и старые значения из флеш/сессии
 $errors = flash('errors') ?? [];
 $old    = $_SESSION['_old'] ?? [];
 clear_old();
@@ -79,42 +73,15 @@ clear_old();
             <form method="post" action="login.php">
                 <input type="hidden" name="_csrf" value="<?= csrf_token() ?>">
 
-                <input
-                    type="text"
-                    name="first_name"
-                    placeholder="Имя"
-                    value="<?= esc($old['first_name'] ?? '') ?>"
-                    class="<?= isset($errors['first_name']) ? 'input-error' : '' ?>"
-                >
-                <?php if (isset($errors['first_name'])): ?>
-                    <span class="error-message"><?= esc($errors['first_name']) ?></span>
-                <?php endif; ?>
+                <input type="text" name="first_name" placeholder="Имя" value="<?= esc($old['first_name'] ?? '') ?>" class="<?= isset($errors['first_name']) ? 'input-error' : '' ?>">
+                <input type="text" name="last_name" placeholder="Фамилия" value="<?= esc($old['last_name'] ?? '') ?>" class="<?= isset($errors['last_name']) ? 'input-error' : '' ?>">
+                <input type="password" name="password" placeholder="Пароль" class="<?= isset($errors['password']) ? 'input-error' : '' ?>">
 
-                <input
-                    type="text"
-                    name="last_name"
-                    placeholder="Фамилия"
-                    value="<?= esc($old['last_name'] ?? '') ?>"
-                    class="<?= isset($errors['last_name']) ? 'input-error' : '' ?>"
-                >
-                <?php if (isset($errors['last_name'])): ?>
-                    <span class="error-message"><?= esc($errors['last_name']) ?></span>
-                <?php endif; ?>
-
-                <input
-                    type="password"
-                    name="password"
-                    placeholder="Пароль"
-                    class="<?= isset($errors['password']) ? 'input-error' : '' ?>"
-                >
-                <?php if (isset($errors['password'])): ?>
-                    <span class="error-message"><?= esc($errors['password']) ?></span>
-                <?php endif; ?>
-
-                <?php if (isset($errors['auth'])): ?>
+                <?php if (isset($errors['rate'])): ?>
+                    <span class="error-message"><?= esc($errors['rate']) ?></span>
+                <?php elseif (isset($errors['auth'])): ?>
                     <span class="error-message"><?= esc($errors['auth']) ?></span>
-                <?php endif; ?>
-                <?php if (isset($errors['csrf'])): ?>
+                <?php elseif (isset($errors['csrf'])): ?>
                     <span class="error-message"><?= esc($errors['csrf']) ?></span>
                 <?php endif; ?>
 

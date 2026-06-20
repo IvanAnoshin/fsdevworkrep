@@ -102,23 +102,34 @@ function is_logged_in(): bool {
 
 function require_auth(): void {
     if (!is_logged_in()) {
-        redirect('/login.php');
+        $currentPage = basename($_SERVER['SCRIPT_NAME']);
+
+        // Гость может смотреть только ленту
+        if ($currentPage === 'feed.php') {
+            return;
+        }
+
+        // API возвращает 401 (для перехвата клиентом)
+        if (strpos($_SERVER['REQUEST_URI'], '/api/') === 0) {
+            http_response_code(401);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Требуется авторизация', 'redirect' => '/login.php']);
+            exit;
+        }
+
+        // Все остальные страницы → на ленту
+        redirect('/feed.php');
     }
-    
-    // === НОВОЕ: Автоматическое обновление статуса "в сети" ===
-    // Обновляем last_active в БД, но не чаще одного раза в 60 секунд,
-    // чтобы не создавать лишнюю нагрузку на базу данных.
+
+    // Обновление last_active (как раньше)
     $lastUpdate = $_SESSION['last_active_update'] ?? 0;
     if (time() - $lastUpdate > 60) {
         try {
             db()->prepare("UPDATE users SET last_active = NOW() WHERE id = ?")
               ->execute([$_SESSION['user_id']]);
             $_SESSION['last_active_update'] = time();
-        } catch (\Exception $e) {
-            // Тихо игнорируем ошибки БД, чтобы не ломать загрузку страницы
-        }
+        } catch (\Exception $e) {}
     }
-    // =========================================================
 }
 
 function require_guest (): void {
@@ -554,4 +565,19 @@ function renderPost(array $post, array $author): string {
     </div>
     <?php
     return ob_get_clean();
+}
+
+if (!function_exists('check_rate_limit')) {
+    function check_rate_limit(string $key, int $max = 5, int $lock = 300): bool {
+        $a = $_SESSION['rate_' . $key] ?? ['count' => 0, 'last' => 0];
+        return !($a['count'] >= $max && time() - $a['last'] < $lock);
+    }
+}
+
+if (!function_exists('record_attempt')) {
+    function record_attempt(string $key): void {
+        if (!isset($_SESSION['rate_' . $key])) $_SESSION['rate_' . $key] = ['count' => 0, 'last' => 0];
+        $_SESSION['rate_' . $key]['count']++;
+        $_SESSION['rate_' . $key]['last'] = time();
+    }
 }

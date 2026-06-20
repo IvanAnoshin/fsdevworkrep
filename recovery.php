@@ -1,5 +1,5 @@
 <?php
-// recovery.php — финальная версия (обновлённая для надёжного алгоритма)
+// recovery.php — финальная версия с защитой от утечки информации
 require_once __DIR__ . '/kopilot/kopilot_init.php';
 require_guest();
 
@@ -69,16 +69,20 @@ if (!$hasPassport) {
 }
 
 // ---------------------------------------------------------
-// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (с защитой от повторного объявления)
 // ---------------------------------------------------------
-function check_rate_limit(string $key, int $max = 5, int $lock = 300): bool {
-    $a = $_SESSION[$key] ?? ['count' => 0, 'last' => 0];
-    return !($a['count'] >= $max && time() - $a['last'] < $lock);
+if (!function_exists('check_rate_limit')) {
+    function check_rate_limit(string $key, int $max = 5, int $lock = 300): bool {
+        $a = $_SESSION[$key] ?? ['count' => 0, 'last' => 0];
+        return !($a['count'] >= $max && time() - $a['last'] < $lock);
+    }
 }
-function record_attempt(string $key): void {
-    if (!isset($_SESSION[$key])) $_SESSION[$key] = ['count' => 0, 'last' => 0];
-    $_SESSION[$key]['count']++;
-    $_SESSION[$key]['last'] = time();
+if (!function_exists('record_attempt')) {
+    function record_attempt(string $key): void {
+        if (!isset($_SESSION[$key])) $_SESSION[$key] = ['count' => 0, 'last' => 0];
+        $_SESSION[$key]['count']++;
+        $_SESSION[$key]['last'] = time();
+    }
 }
 
 function get_top_interlocutor(int $userId): ?array {
@@ -149,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step !== 0) {
     } else {
         $action = $_POST['action'] ?? '';
 
-        // Шаг 1: поиск пользователя
+        // Шаг 1: поиск пользователя (без раскрытия информации)
         if ($action === 'check_user') {
             $firstName = trim($_POST['first_name'] ?? '');
             $lastName  = trim($_POST['last_name'] ?? '');
@@ -159,23 +163,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step !== 0) {
                 $stmt = db()->prepare("SELECT id, first_name, last_name, avatar, city, hometown, country FROM users WHERE first_name LIKE ? AND last_name LIKE ?");
                 $stmt->execute(["%$firstName%", "%$lastName%"]);
                 $candidates = $stmt->fetchAll();
-                if (count($candidates) === 0) {
-                    $errors['auth'] = 'Пользователь не найден';
-                    record_attempt($rateKey);
-                } elseif (count($candidates) === 1) {
-                    $_SESSION['recovery_token'] = bin2hex(random_bytes(16));
-                    $_SESSION['recovery_user_id'] = $candidates[0]['id'];
-                    $_SESSION['recovery_step'] = 2;
-                    header('Location: /recovery.php?token=' . $_SESSION['recovery_token']);
-                    exit;
-                } else {
-                    $_SESSION['recovery_token'] = bin2hex(random_bytes(16));
-                    $_SESSION['candidates'] = $candidates;
-                    $_SESSION['recovery_step'] = 2;
-                    header('Location: /recovery.php?token=' . $_SESSION['recovery_token']);
-                    exit;
-                }
-            } else { record_attempt($rateKey); }
+                
+                // Всегда переходим на шаг 2, не показывая разницы между 0, 1 или несколькими результатами
+                $_SESSION['recovery_token'] = bin2hex(random_bytes(16));
+                $_SESSION['candidates'] = $candidates; // может быть пустым массивом
+                $_SESSION['recovery_step'] = 2;
+                header('Location: /recovery.php?token=' . $_SESSION['recovery_token']);
+                exit;
+            } else { 
+                record_attempt($rateKey); 
+            }
         }
 
         // Выбор из нескольких аккаунтов
@@ -221,35 +218,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $step !== 0) {
             }
         }
 
-// Шаг 3: проверка паспорта
-elseif ($action === 'verify_passport' && $user && $sessionToken) {
-    if ($_POST['recovery_token'] !== $sessionToken) { 
-        $errors['token'] = 'Недействительный токен'; 
-    } else {
-        $passport = $_POST['passport'] ?? '';
-        if (!empty($user['passport_hash']) && password_verify($passport, $user['passport_hash'])) {
-            // ✅ УСПЕХ: генерируем новый пароль
-            $newPassword = bin2hex(random_bytes(4));
-            $hashed = password_hash($newPassword, PASSWORD_DEFAULT);
-            db()->prepare("UPDATE users SET password = ? WHERE id = ?")->execute([$hashed, $user['id']]);
-            
-            // ✅ Генерируем новый паспорт (старый скомпрометирован)
-            $newPassport = bin2hex(random_bytes(8));
-            $newPassportHash = password_hash($newPassport, PASSWORD_DEFAULT);
-            db()->prepare("UPDATE users SET passport_hash = ? WHERE id = ?")->execute([$newPassportHash, $user['id']]);
-            
-            // ✅ Сохраняем для отображения на шаге 10
-            $_SESSION['recovery_new_password'] = $newPassword;
-            $_SESSION['recovery_new_passport'] = $newPassport;
-            
-            unset($_SESSION['recovery_user_id'], $_SESSION['recovery_step'], $_SESSION['candidates'], $_SESSION['recovery_token']);
-            $step = 10;
-        } else { 
-            $errors['passport'] = 'Неверный номер паспорта'; 
-            record_attempt($rateKey); 
+        // Шаг 3: проверка паспорта
+        elseif ($action === 'verify_passport' && $user && $sessionToken) {
+            if ($_POST['recovery_token'] !== $sessionToken) { 
+                $errors['token'] = 'Недействительный токен'; 
+            } else {
+                $passport = $_POST['passport'] ?? '';
+                if (!empty($user['passport_hash']) && password_verify($passport, $user['passport_hash'])) {
+                    $newPassword = bin2hex(random_bytes(4));
+                    $hashed = password_hash($newPassword, PASSWORD_DEFAULT);
+                    db()->prepare("UPDATE users SET password = ? WHERE id = ?")->execute([$hashed, $user['id']]);
+                    
+                    $newPassport = bin2hex(random_bytes(8));
+                    $newPassportHash = password_hash($newPassport, PASSWORD_DEFAULT);
+                    db()->prepare("UPDATE users SET passport_hash = ? WHERE id = ?")->execute([$newPassportHash, $user['id']]);
+                    
+                    $_SESSION['recovery_new_password'] = $newPassword;
+                    $_SESSION['recovery_new_passport'] = $newPassport;
+                    
+                    unset($_SESSION['recovery_user_id'], $_SESSION['recovery_step'], $_SESSION['candidates'], $_SESSION['recovery_token']);
+                    $step = 10;
+                } else { 
+                    $errors['passport'] = 'Неверный номер паспорта'; 
+                    record_attempt($rateKey); 
+                }
+            }
         }
-    }
-}
 
         // Пропуск паспорта
         elseif ($action === 'skip_passport' && $user && $sessionToken) {
@@ -261,7 +255,7 @@ elseif ($action === 'verify_passport' && $user && $sessionToken) {
             }
         }
 
-        // Шаг 5: вопрос о собеседнике (ОБНОВЛЕНО)
+        // Шаг 5: вопрос о собеседнике
         elseif ($action === 'dynamic_question' && $user) {
             $selectedId = (int)($_POST['interlocutor_id'] ?? 0);
             $top = get_top_interlocutor($user['id']);
@@ -271,19 +265,16 @@ elseif ($action === 'verify_passport' && $user && $sessionToken) {
                     ->execute([$user['id'], $top['id'], $token]);
                 $requestId = db()->lastInsertId();
 
-                // --- ОБНОВЛЁННАЯ ЛОГИКА: Отправка уведомлений и владельцу, и другу ---
                 $requestDetails = json_encode([
                     'request_id' => $requestId,
                     'token' => $token,
                     'initiator_name' => $user['first_name'] . ' ' . $user['last_name']
                 ]);
 
-                // Уведомление владельцу (новый тип)
                 db()->prepare("INSERT INTO notifications (user_id, type, actor_id, extra, is_read, created_at)
                     VALUES (?, 'recovery_request_initial', NULL, ?, 0, NOW())")
                     ->execute([$user['id'], $requestDetails]);
 
-                // Уведомление другу
                 db()->prepare("INSERT INTO notifications (user_id, type, actor_id, extra, is_read, created_at)
                     VALUES (?, 'recovery_alert', NULL, ?, 0, NOW())")
                     ->execute([
@@ -292,15 +283,13 @@ elseif ($action === 'verify_passport' && $user && $sessionToken) {
                             'request_id' => $requestId,
                             'token' => $token,
                             'owner_name' => $user['first_name'] . ' ' . $user['last_name'],
-                            'requires_owner_confirmation' => true // Флаг для интерфейса
+                            'requires_owner_confirmation' => true
                         ])
                     ]);
 
-                // --- КОНЕЦ ОБНОВЛЁННОЙ ЛОГИКИ ---
-
                 $_SESSION['pending_request_id'] = $requestId;
                 $_SESSION['pending_request_token'] = $token;
-                $_SESSION['recovery_step'] = 6; // Ожидание
+                $_SESSION['recovery_step'] = 6;
                 header('Location: /recovery.php?token=' . $_SESSION['recovery_token']);
                 exit;
             } else {
@@ -319,7 +308,7 @@ $allInterlocutors = [];
 if ($step === 5 && $user) {
     $allInterlocutors = get_all_interlocutors($user['id']);
     if (empty($allInterlocutors)) {
-        $_SESSION['recovery_no_interlocutors'] = true; // Флаг для шага 7
+        $_SESSION['recovery_no_interlocutors'] = true;
         $_SESSION['recovery_step'] = 7;
         header('Location: /recovery.php?token=' . $sessionToken);
         exit;
@@ -334,7 +323,6 @@ if ($step === 5 && $user) {
     <title>Восстановление пароля – Friendscape</title>
     <link rel="stylesheet" href="css/main.css">
     <style>
-        /* ... (стили остаются прежними) ... */
         body { background: #f0f2f5; }
         .loginPageArea { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 20px; }
         .welcome { color: #3b5dd3; font-size: 2.5em; font-weight: 600; margin-bottom: 30px; }
@@ -362,7 +350,6 @@ if ($step === 5 && $user) {
         .autocomplete-item .placeholder-avatar { width: 40px; height: 40px; border-radius: 50%; background: #e0e7ff; color: #3b5dd3; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 1rem; }
         #pending-screen { text-align: center; }
         #pending-screen button { background: #3b5dd3; color: white; border: none; padding: 10px 20px; border-radius: 8px; margin-top: 10px; cursor: pointer; }
-        .secret-question-text { font-weight: 500; margin-bottom: 10px; }
         .loader-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.6); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 9999; }
         .loader-spinner { width: 48px; height: 48px; border: 5px solid rgba(59,93,211,0.2); border-top: 5px solid #3b5dd3; border-radius: 50%; animation: spin 0.7s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -384,7 +371,6 @@ if ($step === 5 && $user) {
         <?php if (isset($errors['first_name'])): ?><span class="error-message"><?= esc($errors['first_name']) ?></span><?php endif; ?>
         <input type="text" name="last_name" placeholder="Фамилия" value="<?= esc($_POST['last_name'] ?? '') ?>" class="<?= isset($errors['last_name']) ? 'input-error' : '' ?>">
         <?php if (isset($errors['last_name'])): ?><span class="error-message"><?= esc($errors['last_name']) ?></span><?php endif; ?>
-        <?php if (isset($errors['auth'])): ?><span class="error-message"><?= esc($errors['auth']) ?></span><?php endif; ?>
         <button type="submit">Продолжить</button>
     </form>
 
