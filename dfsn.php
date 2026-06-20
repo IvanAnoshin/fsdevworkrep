@@ -509,36 +509,43 @@ class DFSN {
 
     // ==================== ВЕКТОР ИНТЕРЕСОВ ====================
 
-    public function updateInterestVector(int $userId, array $extraWords = []): void {
-        $this->guardValidUser($userId);
-        $vector = array_fill(0, VECTOR_DIMENSION, 0.0);
-        $posts = select("SELECT content FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 100", [$userId]);
-        foreach ($posts as $post) {
-            $words = tokenize($post['content']);
-            foreach ($words as $word) {
-                $idx = abs(crc32($word) % VECTOR_DIMENSION);
-                $vector[$idx] += 1.0;
-            }
+public function updateInterestVector(int $userId, array $extraWords = []): void {
+    $this->guardValidUser($userId);
+    $vector = array_fill(0, VECTOR_DIMENSION, 0.0);
+    $posts = select("SELECT content FROM posts WHERE user_id = ? ORDER BY created_at DESC LIMIT 100", [$userId]);
+    foreach ($posts as $post) {
+        $words = tokenize($post['content']);
+        foreach ($words as $word) {
+            $idx = abs(crc32($word) % VECTOR_DIMENSION);
+            $vector[$idx] += 1.0;
         }
-        // Добавляем слова из дополнительных источников (имена файлов, описания фото)
-        foreach ($extraWords as $word) {
-            $word = mb_strtolower(trim($word));
-            if ($word !== '') {
-                $idx = abs(crc32($word) % VECTOR_DIMENSION);
-                $vector[$idx] += 1.0;
-            }
-        }
-        $norm = array_sum($vector) ?: 1;
-        foreach ($vector as &$v) $v /= $norm;
-
-        db()->prepare("INSERT INTO dfsn_interest_vectors (user_id, vector, updated_at) VALUES (?, ?, ?)
-                    ON DUPLICATE KEY UPDATE vector = VALUES(vector), updated_at = VALUES(updated_at)")
-            ->execute([$userId, json_encode($vector), time()]);
-
-        $this->collectSample(['interest_vector' => $vector], 'interest');
-
-        $this->invalidateRecommendationCache($userId);
     }
+    foreach ($extraWords as $word) {
+        $word = mb_strtolower(trim($word));
+        if ($word !== '') {
+            $idx = abs(crc32($word) % VECTOR_DIMENSION);
+            $vector[$idx] += 1.0;
+        }
+    }
+    $norm = array_sum($vector) ?: 1;
+    foreach ($vector as &$v) $v /= $norm;
+
+    // Безопасная вставка/обновление для MariaDB 11.8
+    $json = json_encode($vector);
+    $db = db();
+    $stmt = $db->prepare("SELECT user_id FROM dfsn_interest_vectors WHERE user_id = ?");
+    $stmt->execute([$userId]);
+    if ($stmt->fetch()) {
+        $db->prepare("UPDATE dfsn_interest_vectors SET vector = ?, updated_at = ? WHERE user_id = ?")
+           ->execute([$json, time(), $userId]);
+    } else {
+        $db->prepare("INSERT INTO dfsn_interest_vectors (user_id, vector, updated_at) VALUES (?, ?, ?)")
+           ->execute([$userId, $json, time()]);
+    }
+
+    $this->collectSample(['interest_vector' => $vector], 'interest');
+    $this->invalidateRecommendationCache($userId);
+}
 
     public function updateProfileVector(int $userId, array $profileFields): void
     {
