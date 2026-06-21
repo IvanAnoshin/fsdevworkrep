@@ -54,12 +54,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             require_once __DIR__ . '/dfsn.php';
             $dfsn = new DFSN();
             // Инициализируем веса для нового пользователя
-            $dfsn->calculateUserWeights($userId);
+            // $dfsn->calculateUserWeights($userId);
             // Также сразу строим начальный вектор интересов (пустой, но валидный)
-            $dfsn->updateInterestVector($userId);
+            // $dfsn->updateInterestVector($userId);
             // ========================
 
             $_SESSION['user_id'] = $userId;
+            $_SESSION['authenticated'] = true;
             header('Location: 2fa.php');
             exit;
         }

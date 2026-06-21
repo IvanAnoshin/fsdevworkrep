@@ -266,7 +266,6 @@ if ($isGuest) {
     <div id="post-actions-menu" class="post-actions-menu"></div>
 
     <script>
-    const originalFetch = window.fetch;
     window.fetch = function(...args) {
         return originalFetch.apply(this, args).then(response => {
             if (response.status === 401) {
