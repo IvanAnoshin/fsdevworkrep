@@ -81,8 +81,7 @@ function dfsn_install_tables(): void {
             w_expert FLOAT NOT NULL DEFAULT 1.0,
             endorsement_sum FLOAT NOT NULL DEFAULT 0.0,
             complaint_penalty FLOAT NOT NULL DEFAULT 0.0,
-            updated_at INT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            updated_at INT NOT NULL
         ) ENGINE=InnoDB;
 
         CREATE TABLE IF NOT EXISTS dfsn_endorsements (
@@ -91,11 +90,7 @@ function dfsn_install_tables(): void {
             to_user_id INT NOT NULL,
             coefficient FLOAT NOT NULL DEFAULT 0.05,
             created_at INT NOT NULL,
-            FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (to_user_id) REFERENCES users(id) ON DELETE CASCADE,
-            UNIQUE KEY unique_pair (from_user_id, to_user_id),
-            INDEX idx_to_user (to_user_id),
-            INDEX idx_from_user (from_user_id)
+            UNIQUE KEY unique_pair (from_user_id, to_user_id)
         ) ENGINE=InnoDB;
 
         CREATE TABLE IF NOT EXISTS dfsn_complaints (
@@ -103,26 +98,20 @@ function dfsn_install_tables(): void {
             from_user_id INT NOT NULL,
             to_user_id INT NOT NULL,
             weight FLOAT NOT NULL DEFAULT 0.1,
-            created_at INT NOT NULL,
-            FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (to_user_id) REFERENCES users(id) ON DELETE CASCADE,
-            INDEX idx_to_user (to_user_id),
-            INDEX idx_created (created_at)
+            created_at INT NOT NULL
         ) ENGINE=InnoDB;
 
         CREATE TABLE IF NOT EXISTS dfsn_interest_vectors (
             user_id INT PRIMARY KEY,
-            vector JSON NOT NULL,
-            updated_at INT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            vector TEXT NOT NULL,
+            updated_at INT NOT NULL DEFAULT 0
         ) ENGINE=InnoDB;
 
         CREATE TABLE IF NOT EXISTS dfsn_behavior_profiles (
             user_id INT PRIMARY KEY,
             profile_data JSON NOT NULL,
             sample_count INT NOT NULL DEFAULT 0,
-            updated_at INT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            updated_at INT NOT NULL
         ) ENGINE=InnoDB;
 
         CREATE TABLE IF NOT EXISTS dfsn_recommendations_cache (
@@ -130,8 +119,7 @@ function dfsn_install_tables(): void {
             type ENUM('people','content') NOT NULL,
             items JSON NOT NULL,
             created_at INT NOT NULL,
-            PRIMARY KEY (user_id, type),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            PRIMARY KEY (user_id, type)
         ) ENGINE=InnoDB;
 
         CREATE TABLE IF NOT EXISTS post_metrics (
@@ -139,18 +127,13 @@ function dfsn_install_tables(): void {
             post_id INT NOT NULL,
             read_time FLOAT NOT NULL DEFAULT 0,
             author_id INT NOT NULL,
-            created_at INT NOT NULL DEFAULT (UNIX_TIMESTAMP()),
-            FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
-            INDEX idx_author (author_id),
-            INDEX idx_post (post_id)
+            created_at INT NOT NULL DEFAULT (UNIX_TIMESTAMP())
         ) ENGINE=InnoDB;
 
         CREATE TABLE IF NOT EXISTS user_sessions (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,
-            login_time INT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            INDEX idx_user_time (user_id, login_time)
+            login_time INT NOT NULL
         ) ENGINE=InnoDB;
 
         CREATE TABLE IF NOT EXISTS dfsn_log (
@@ -158,34 +141,24 @@ function dfsn_install_tables(): void {
             user_id INT NOT NULL COMMENT 'чей аккаунт затронут',
             event_type VARCHAR(32) NOT NULL COMMENT 'тип события',
             context JSON NULL COMMENT 'дополнительные данные',
-            created_at INT NOT NULL,
-            INDEX idx_user (user_id),
-            INDEX idx_event (event_type),
-            INDEX idx_created (created_at)
+            created_at INT NOT NULL
         ) ENGINE=InnoDB;
 
-        -- Таблица для сбора образцов датасета
         CREATE TABLE IF NOT EXISTS dfsn_dataset (
             id INT AUTO_INCREMENT PRIMARY KEY,
             features JSON NOT NULL COMMENT 'вектор признаков (обезличенный)',
             label VARCHAR(32) NULL COMMENT 'метка (trusted, suspicious, anomaly, high_quality, etc.)',
             source_type VARCHAR(32) NOT NULL COMMENT 'behaviour, content, social',
-            created_at INT NOT NULL,
-            INDEX idx_label (label),
-            INDEX idx_source (source_type),
-            INDEX idx_created (created_at)
+            created_at INT NOT NULL
         ) ENGINE=InnoDB;
 
-        -- Таблица для дампов модели
         CREATE TABLE IF NOT EXISTS dfsn_model_dumps (
             id INT AUTO_INCREMENT PRIMARY KEY,
             dump_data JSON NOT NULL COMMENT 'полный дамп состояния модели',
-            created_at INT NOT NULL,
-            INDEX idx_created (created_at)
+            created_at INT NOT NULL
         ) ENGINE=InnoDB;
     ");
 
-    // Дополнительные индексы для внешних таблиц
     try {
         $db->exec("CREATE INDEX idx_posts_created ON posts(created_at)");
     } catch (\PDOException $e) {
@@ -236,7 +209,6 @@ class DFSN {
     public function calculateUserWeights(int $userId): array {
         $this->guardValidUser($userId);
         $user = find('users', $userId);
-        // Исправлено: прямой запрос вместо find('dfsn_weights', ...)
         $stmt = db()->prepare("SELECT * FROM dfsn_weights WHERE user_id = ?");
         $stmt->execute([$userId]);
         $row = $stmt->fetch();
@@ -260,7 +232,6 @@ class DFSN {
             WHERE user_id = ?")
         ->execute([$wTrust, $wActivity, $wExpert, $complaintPenalty, time(), $userId]);
 
-        // Сбор образца социального профиля
         if (DFSN_DATA_COLLECTION_ENABLED) {
             $label = $wTrust >= 1.5 ? 'trusted' : ($wTrust < 0.3 ? 'suspicious' : null);
             $this->collectSample([
@@ -292,7 +263,6 @@ class DFSN {
 
     public function getUserWeights(int $userId): array {
         $this->guardValidUser($userId);
-        // Исправлено: прямой запрос вместо find('dfsn_weights', ...)
         $stmt = db()->prepare("SELECT * FROM dfsn_weights WHERE user_id = ?");
         $stmt->execute([$userId]);
         $data = $stmt->fetch();
@@ -303,7 +273,6 @@ class DFSN {
                 'w_expert'   => (float)$data['w_expert']
             ];
         }
-        // Создаём запись с начальными весами, если её нет
         $default = ['w_trust' => W_BASE, 'w_activity' => W_BASE, 'w_expert' => W_BASE];
         db()->prepare("INSERT IGNORE INTO dfsn_weights (user_id, w_trust, w_activity, w_expert, endorsement_sum, complaint_penalty, updated_at)
                     VALUES (?, ?, ?, ?, 0, 0, ?)")
@@ -332,7 +301,6 @@ class DFSN {
         $fromWeights = $this->getUserWeights($fromUserId);
         if ($fromWeights['w_activity'] < MIN_ACTIVITY_FOR_ENDORSE) return 'low_activity_denied';
 
-        // Проверка дневного лимита
         $todayCount = scalar(
             "SELECT COUNT(*) FROM dfsn_endorsements WHERE from_user_id = ? AND created_at > UNIX_TIMESTAMP(DATE(NOW()))",
             [$fromUserId]
@@ -341,7 +309,6 @@ class DFSN {
             return 'daily_limit_reached';
         }
 
-        // Проверка общего лимита
         $activeCount = scalar("SELECT COUNT(*) FROM dfsn_endorsements WHERE from_user_id = ?", [$fromUserId]);
         if ($activeCount >= MAX_ACTIVE_ENDORSEMENTS) {
             return 'total_limit_reached';
@@ -350,7 +317,6 @@ class DFSN {
         $coeff = ENDORSEMENT_K * (1 + $fromWeights['w_trust'] / W_BASE);
         $increment = $fromWeights['w_trust'] * $coeff;
 
-        // Прямая вставка без транзакции
         try {
             db()->prepare("INSERT INTO dfsn_endorsements (from_user_id, to_user_id, coefficient, created_at) VALUES (?, ?, ?, ?)")
                 ->execute([$fromUserId, $toUserId, round($coeff, 4), time()]);
@@ -361,7 +327,6 @@ class DFSN {
             throw $e;
         }
 
-        // Обновление веса получателя
         db()->prepare("UPDATE dfsn_weights SET 
             endorsement_sum = endorsement_sum + ?,
             w_trust = W_BASE + endorsement_sum + ? - complaint_penalty,
@@ -452,7 +417,6 @@ class DFSN {
 
     public function getBehavioralProfile(int $userId): array {
         $this->guardValidUser($userId);
-        // Исправлено: прямой запрос вместо find('dfsn_behavior_profiles', ...)
         $stmt = db()->prepare("SELECT * FROM dfsn_behavior_profiles WHERE user_id = ?");
         $stmt->execute([$userId]);
         $row = $stmt->fetch();
@@ -536,12 +500,10 @@ class DFSN {
             ->execute([$userId, json_encode($vector), time()]);
 
         $this->collectSample(['interest_vector' => $vector], 'interest');
-
         $this->invalidateRecommendationCache($userId);
     }
 
-    public function updateProfileVector(int $userId, array $profileFields): void
-    {
+    public function updateProfileVector(int $userId, array $profileFields): void {
         $words = [];
         foreach ($profileFields as $value) {
             if (is_string($value) && trim($value) !== '') {
@@ -553,13 +515,11 @@ class DFSN {
 
     public function getInterestVector(int $userId): array {
         $this->guardValidUser($userId);
-        // Исправлено: прямой запрос вместо find('dfsn_interest_vectors', ...)
         $stmt = db()->prepare("SELECT * FROM dfsn_interest_vectors WHERE user_id = ?");
         $stmt->execute([$userId]);
         $row = $stmt->fetch();
         if ($row) return json_decode($row['vector'], true);
         $this->updateInterestVector($userId);
-        // повторно получаем после создания
         $stmt = db()->prepare("SELECT * FROM dfsn_interest_vectors WHERE user_id = ?");
         $stmt->execute([$userId]);
         $row = $stmt->fetch();
@@ -647,10 +607,8 @@ class DFSN {
         $now = time();
 
         // === ГЕНДЕРНЫЙ ФАКТОР ===
-        // Получаем пол текущего пользователя (один запрос)
         $currentUserGender = scalar("SELECT gender FROM users WHERE id = ?", [$userId]) ?: null;
         
-        // Получаем пол всех авторов постов (один bulk-запрос)
         $genderMap = [];
         if ($currentUserGender) {
             $placeholders = implode(',', array_fill(0, count($authorIds), '?'));

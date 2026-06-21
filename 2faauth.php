@@ -10,6 +10,27 @@ if (!isset($_SESSION['login_user_id'])) {
 $userId = (int) $_SESSION['login_user_id'];
 $errors = [];
 
+// Получаем пользователя и проверяем, задан ли секретный вопрос
+$user = find('users', $userId);
+$hasSecret = $user && !empty($user['secret_question']);
+
+// Если секретный вопрос не задан, сразу пропускаем
+if (!$hasSecret) {
+    // Завершаем аутентификацию без проверки
+    $_SESSION['authenticated'] = true;
+    $_SESSION['user_id'] = $userId;
+    $_SESSION['login_time'] = date('Y-m-d H:i:s');
+    unset($_SESSION['login_user_id']);
+
+    // Сохраняем сессию в БД для отображения в настройках
+    db()->prepare("INSERT INTO user_sessions (user_id, login_time) VALUES (?, ?)")
+        ->execute([$userId, $_SESSION['login_time']]);
+
+    header('Location: /preloader.php');
+    exit;
+}
+
+// Если секретный вопрос задан — обрабатываем POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // CSRF проверка
     if (!hash_equals(csrf_token(), $_POST['_csrf'] ?? '')) {
@@ -20,8 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($secretAnswer === '') {
             $errors['secret_answer'] = 'Введите секретный ответ';
         } else {
-            // Ищем пользователя и проверяем секретный ответ
-            $user = find('users', $userId);
+            // Проверяем секретный ответ
             if ($user && !empty($user['secret_question']) && password_verify($secretAnswer, $user['secret_question'])) {
                 // Успешная двухфакторная аутентификация
                 session_regenerate_id(true); // защита от session fixation
