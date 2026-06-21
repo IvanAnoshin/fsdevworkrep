@@ -1,10 +1,23 @@
 <?php
 require_once __DIR__ . '/kopilot/kopilot_init.php';
-require_auth();
+
+// Если пользователь уже полностью авторизован (есть флаг authenticated), на 2fa ему не нужно
+if (is_logged_in()) {
+    header('Location: /profile.php');
+    exit;
+}
+
+// Если нет user_id — гость, отправляем на логин
+if (!isset($_SESSION['user_id'])) {
+    header('Location: /login.php');
+    exit;
+}
 
 $user = find('users', $_SESSION['user_id']);
 if (!$user) {
-    header('Location: register.php');
+    // такого быть не должно, но на всякий случай сбросим сессию
+    unset($_SESSION['user_id']);
+    header('Location: /register.php');
     exit;
 }
 
@@ -18,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (isset($_POST['action']) && $_POST['action'] === 'finish') {
         // Шаг 2: завершение — скрываем паспорт и переходим в профиль
         unset($_SESSION['show_passport']);
-        header('Location: profile.php');
+        header('Location: /profile.php');
         exit;
     } else {
         // Шаг 1: сохранение секретного вопроса
