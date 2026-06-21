@@ -530,7 +530,7 @@ public function updateInterestVector(int $userId, array $extraWords = []): void 
     $norm = array_sum($vector) ?: 1;
     foreach ($vector as &$v) $v /= $norm;
 
-    // Безопасная вставка/обновление для MariaDB 11.8
+    // Безопасная вставка/обновление для MySQL 8.0 / MariaDB
     $json = json_encode($vector);
     $db = db();
     $stmt = $db->prepare("SELECT user_id FROM dfsn_interest_vectors WHERE user_id = ?");
