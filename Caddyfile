@@ -1,0 +1,3 @@
+friendscape.ru, www.friendscape.ru {
+    reverse_proxy app:80
+}
